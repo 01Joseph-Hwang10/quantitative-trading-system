@@ -1,0 +1,35 @@
+[project]
+name = "quantitative-trading-system"
+version = "0.1.0"
+description = "Quantitative Trading System"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.18.1",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.15.0",
+    "ta-lib>=0.7.1",
+    "yfinance>=1.7.0",
+]
+
+[dependency-groups]
+dev = [
+    "jupyter-bokeh>=4.1.0",
+    "backtesting>=0.6.6",
+    "black>=26.5.1",
+    "ipykernel>=7.3.0",
+    "isort>=9.0.1",
+]
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+line-length = 120
+target-version = ["py313"]
+include = "\\.pyi?$"
+extend-exclude = "/(\n  # The following are specific to Black, you probably don't want those.\n  tests/data\n  | profiling\n)/\n"
