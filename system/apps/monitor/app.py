@@ -42,11 +42,11 @@ def main() -> None:
     email = st.user.email
     if not support.is_authorized(email, settings):
         st.error(f"Unauthorized user: {email}. Ask an administrator to add you to AUTHORIZED_USERS.")
-        st.logout("Log out")
+        st.button("Log out", on_click=st.logout)
         st.stop()
 
     st.sidebar.write(f"👤 {email}")
-    st.sidebar.logout()
+    st.sidebar.button("Log out", on_click=st.logout)
 
     with open_connections(settings) as connections:
         overview_tab, feeds_tab, feed_detail_tab, trades_tab, settings_tab = st.tabs(

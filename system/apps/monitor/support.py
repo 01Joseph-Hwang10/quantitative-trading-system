@@ -28,11 +28,14 @@ def ensure_auth_secrets(settings: Settings) -> Path:
     existing: dict = {}
     if secrets_path.exists():
         existing = toml.loads(secrets_path.read_text())
-    existing.setdefault(
-        "auth",
+    # Shared OIDC settings live in [auth]; the named provider "google" (used by
+    # st.login("google")) requires its own [auth.google] section.
+    auth_section = existing.setdefault("auth", {})
+    auth_section.setdefault("redirect_uri", settings.google_redirect_uri)
+    auth_section.setdefault("cookie_secret", _cookie_secret(settings))
+    auth_section.setdefault(
+        "google",
         {
-            "redirect_uri": settings.google_redirect_uri,
-            "cookie_secret": _cookie_secret(settings),
             "client_id": settings.google_client_id,
             "client_secret": settings.google_client_secret,
             "server_metadata_url": GOOGLE_METADATA_URL,
