@@ -165,7 +165,7 @@ def _overview_body(metadata_conn: sqlite3.Connection) -> None:
     if performance["equity_curve"]:
         equity_frame = pd.DataFrame(performance["equity_curve"], columns=["ts", "total"])
         equity_frame["ts"] = pd.to_datetime(equity_frame["ts"])
-        st.line_chart(equity_frame.set_index("ts")["total"])
+        st.plotly_chart(_equity_figure(equity_frame.set_index("ts")["total"]), use_container_width=True)
     else:
         st.write("No account snapshots yet.")
 
@@ -236,7 +236,7 @@ def _performance_body(metadata_conn: sqlite3.Connection) -> None:
     if equity_curve:
         equity_frame = pd.DataFrame(equity_curve, columns=["ts", "total"])
         equity_frame["ts"] = pd.to_datetime(equity_frame["ts"])
-        st.area_chart(equity_frame.set_index("ts")["total"])
+        st.plotly_chart(_equity_figure(equity_frame.set_index("ts")["total"]), use_container_width=True)
     else:
         st.write("No account snapshots in this timespan.")
 
@@ -244,7 +244,7 @@ def _performance_body(metadata_conn: sqlite3.Connection) -> None:
     if performance["drawdown_curve"]:
         drawdown_frame = pd.DataFrame(performance["drawdown_curve"], columns=["ts", "drawdown"])
         drawdown_frame["ts"] = pd.to_datetime(drawdown_frame["ts"])
-        st.area_chart(drawdown_frame.set_index("ts")["drawdown"])
+        st.plotly_chart(_drawdown_figure(drawdown_frame.set_index("ts")["drawdown"]), use_container_width=True)
     else:
         st.write("Not enough snapshots to compute drawdown.")
 
@@ -335,7 +335,7 @@ def render_feed_detail(feed_conn: sqlite3.Connection) -> None:
     elif "close" in frame.columns:
         st.plotly_chart(_ohlcv_figure(frame, name), use_container_width=True)
     else:
-        st.line_chart(frame.set_index("date")["value"])
+        st.plotly_chart(_scalar_figure(frame, name), use_container_width=True)
 
     st.caption("Preview (latest 200 rows)")
     st.dataframe(pd.DataFrame([dict(row) for row in rows[-200:]]), use_container_width=True)
@@ -343,6 +343,64 @@ def render_feed_detail(feed_conn: sqlite3.Connection) -> None:
         feed_store.drop_feed(feed_conn, name)
         st.success(f"Dropped feed {name!r}")
         st.rerun()
+
+
+def _padded_range(values: pd.Series, padding: float = 0.05) -> list[float]:
+    """Tight y-axis range around the data so small variations stay visible."""
+    low, high = float(values.min()), float(values.max())
+    if low == high:
+        margin = abs(low) * 0.01 or 1.0
+    else:
+        margin = (high - low) * padding
+    return [low - margin, high + margin]
+
+
+def _equity_figure(equity: pd.Series) -> go.Figure:
+    """Equity curve with the y-axis zoomed to the data range (never zero-based)."""
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(x=equity.index, y=equity.values, mode="lines", name="Total value", line=dict(width=2)))
+    figure.update_layout(
+        height=360,
+        margin=dict(l=10, r=10, t=20, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    figure.update_yaxes(range=_padded_range(equity), tickformat=",.0f")
+    return figure
+
+
+def _drawdown_figure(drawdown: pd.Series) -> go.Figure:
+    """Underwater chart as a filled percentage area, zoomed to the data range."""
+    pct = drawdown * 100
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=pct.index,
+            y=pct.values,
+            mode="lines",
+            fill="tozeroy",
+            name="Drawdown",
+            line=dict(width=1.5, color="rgb(255,82,82)"),
+            fillcolor="rgba(255,82,82,0.25)",
+        )
+    )
+    figure.update_layout(height=240, margin=dict(l=10, r=10, t=20, b=10), showlegend=False)
+    low = float(pct.min())
+    figure.update_yaxes(range=[low * 1.1 if low < 0 else -1, 0], ticksuffix="%")
+    return figure
+
+
+def _scalar_figure(frame: pd.DataFrame, name: str) -> go.Figure:
+    """Line chart for a scalar feed with the y-axis zoomed to the data range."""
+    values = frame.set_index("date")["value"]
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(x=values.index, y=values.values, mode="lines", name=name, line=dict(width=2)))
+    figure.update_layout(
+        height=360,
+        margin=dict(l=10, r=10, t=20, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    figure.update_yaxes(range=_padded_range(values))
+    return figure
 
 
 def _ohlcv_figure(frame: pd.DataFrame, name: str) -> go.Figure:
