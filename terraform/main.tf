@@ -19,6 +19,11 @@ resource "google_project_service" "iap" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "logging" {
+  service            = "logging.googleapis.com"
+  disable_on_destroy = false
+}
+
 # ── Artifact Registry ─────────────────────────────────────────────────────────
 resource "google_artifact_registry_repository" "docker" {
   project       = var.project_id

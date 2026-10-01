@@ -28,8 +28,8 @@ system/
 │   │   ├── feeds/               # DataFeed (pd.DataFrame subclass) + registry
 │   │   ├── strategy/            # Strategy protocol + GoldEnsembleStrategy
 │   │   └── db/                  # metadata.db and feed.db layers (sqlite)
-│   └── config/                  # Settings (.env) + gateway factories
-├── terraform/                   # GCP: VM, Artifact Registry, firewall, IAM
+│   └── config/                  # Settings (.env) + logging setup + gateway factories
+├── terraform/                   # GCP: API enablement, VM, Artifact Registry, firewall, IAM
 ├── ansible/                     # VM bootstrap + deploy/update/rollback
 ├── tests/                       # pytest suite
 ├── Dockerfile / justfile        # image build + operational entrypoints
@@ -48,7 +48,7 @@ system/
 
 ```bash
 uv sync                     # install locked dependencies (dev group included)
-uv run pytest               # 32 tests, all should pass
+uv run pytest               # 38 tests, all should pass
 ```
 
 ### Environment files
@@ -63,6 +63,9 @@ Two env files, both **gitignored** — never commit real values:
 Start from `.env.example` and fill in: `TOSSSEC_CLIENT_ID/SECRET` (broker),
 `GOOGLE_CLIENT_ID/SECRET` (monitor login), `AUTHORIZED_USERS` (comma-separated
 emails allowed into the monitor).
+
+`GOOGLE_CLOUD_PROJECT` (GCP Logging) is **not** user-managed — docker compose
+injects it on the VM only, so local runs keep stdout-only logging.
 
 ### Run locally (mock broker)
 
@@ -147,6 +150,30 @@ just tunnel           # port-forward the monitor to localhost:8501
   the error plus a rollback hint — rollback is always manual.
 - All GCP recipes activate the `quantitative-trading` IAM context via
   `ctx use` automatically.
+- **Logs are shipped to GCP Logging** in production: both containers attach a
+  Cloud Logging handler when compose injects `GOOGLE_CLOUD_PROJECT`, writing
+  with the VM service account (`roles/logging.logWriter`) — no Ops Agent
+  needed on the 1 GB VM. Logs still stream to stdout (`just logs trader`).
+  Each service carries a `service` label (`trader` / `monitor`) so its logs
+  can be filtered independently in the Logs Explorer. In the links below,
+  replace `<PROJECT_ID>` with your GCP project ID (`project_id` in
+  `terraform/terraform.tfvars`):
+
+  | View | Logs Explorer link |
+  |---|---|
+  | Trader | `https://console.cloud.google.com/logs/query;query=labels.service=trader?project=<PROJECT_ID>` |
+  | Monitor | `https://console.cloud.google.com/logs/query;query=labels.service=monitor?project=<PROJECT_ID>` |
+  | Both services | `https://console.cloud.google.com/logs/query;query=labels.service=trader%20OR%20labels.service=monitor?project=<PROJECT_ID>` |
+
+  If a deep link misbehaves, open the Logs Explorer for your project
+  (`https://console.cloud.google.com/logs/query?project=<PROJECT_ID>`) and
+  paste the filter (e.g. `labels.service="trader"`) into the query editor,
+  or verify from the terminal:
+
+  ```bash
+  gcloud logging read 'labels.service="trader"' \
+    --project <PROJECT_ID> --limit 5
+  ```
 - Terraform state is local (`terraform/*.tfstate`, gitignored).
 
 ### Generated & environment-specific files
@@ -202,5 +229,7 @@ uv run isort system tests              # sort imports
 ```
 
 Design decisions and phase-by-phase instructions live in `specs/`:
-`specs/001--initial-implementation` (app) and `specs/002--deployment`
-(infrastructure), each with `draft.md` → `plan.md` → `instruction.md`.
+`001--initial-implementation` (app), `002--deployment` (infrastructure),
+`003--readme` (this README), `004--ui-improvement` (monitor UI), and
+`005--gcp-logging` (Cloud Logging integration) — each with a `draft.md`
+(requirements) and, where implemented, a `plan.md` (implementation record).

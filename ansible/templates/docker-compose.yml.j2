@@ -5,6 +5,9 @@ services:
     env_file: .env
     environment:
       - DATA_DIR=/app/data
+      # Presence of this variable enables shipping logs to GCP Logging from
+      # inside the container (metadata-server ADC + roles/logging.logWriter).
+      - GOOGLE_CLOUD_PROJECT={{ gcp_project }}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -21,6 +24,7 @@ services:
     env_file: .env
     environment:
       - DATA_DIR=/app/data
+      - GOOGLE_CLOUD_PROJECT={{ gcp_project }}
     volumes:
       - ./data:/app/data
     ports:

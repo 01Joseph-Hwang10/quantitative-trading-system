@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 import time
 from pathlib import Path
@@ -11,6 +10,7 @@ from pathlib import Path
 from system.apps.trader.runner import Runner
 from system.apps.trader.trader import Trader
 from system.config.gateways import build_broker, open_connections
+from system.config.logging_setup import setup_logging
 from system.config.settings import Settings
 
 HEARTBEAT_MAX_AGE_SECONDS = 600  # runner wakes every 30 s; 10 min = 20 missed wakes
@@ -41,10 +41,7 @@ def main() -> int:
     if args.healthcheck == "healthcheck":
         return run_healthcheck(settings)
 
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    setup_logging(settings, service="trader")
 
     settings.ensure_data_dir()
     with open_connections(settings) as connections:

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Seoul"
     log_level: str = "INFO"
 
+    # Google Cloud Logging — set only in production (docker compose injects
+    # GOOGLE_CLOUD_PROJECT on the VM); local .env leaves it unset so logs stay
+    # on stdout only.
+    google_cloud_project: str | None = None
+
     @property
     def authorized_user_list(self) -> list[str]:
         return [email.strip() for email in self.authorized_users.split(",") if email.strip()]

@@ -8,6 +8,13 @@ from pathlib import Path
 
 
 def main() -> None:
+    from system.config.logging_setup import setup_logging
+    from system.config.settings import Settings
+
+    # Runs before Streamlit executes app.py in-process, so the root handlers
+    # (stderr + Cloud Logging on the VM) cover monitor logs as well.
+    setup_logging(Settings(), service="monitor")
+
     from streamlit.web import cli as streamlit_cli
 
     app_path = Path(__file__).with_name("app.py").resolve()
