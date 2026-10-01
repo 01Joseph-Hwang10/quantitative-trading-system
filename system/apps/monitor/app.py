@@ -73,6 +73,7 @@ def main() -> None:
         st.stop()
 
     connections = _monitor_connections(settings)
+    st.sidebar.markdown("# QT Monitor")
     st.sidebar.write(f"👤 {email}")
     st.sidebar.button("Log out", on_click=st.logout)
     st.sidebar.toggle("Auto-refresh (60s)", key="auto_refresh")
