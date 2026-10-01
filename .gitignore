@@ -33,3 +33,4 @@ ansible/*.retry
 
 # MacOS
 .DS_Store
+terraform/terraform.tfvars
