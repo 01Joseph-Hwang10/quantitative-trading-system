@@ -1,0 +1,29 @@
+---
+# Manual rollback to the tag recorded in `previous_tag` (written on every
+# successful deploy/update that changed the tag). Never runs automatically.
+- name: Roll back quantitative-trading stack
+  hosts: vm
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read previous tag
+      ansible.builtin.slurp:
+        src: "{{ app_dir }}/previous_tag"
+      register: previous_tag_file
+
+    - name: Fail if no previous tag exists
+      ansible.builtin.fail:
+        msg: "No previous tag recorded at {{ app_dir }}/previous_tag — nothing to roll back to."
+      when: (previous_tag_file.content | b64decode | trim) | length == 0
+
+    - name: Set rollback target
+      ansible.builtin.set_fact:
+        tag: "{{ previous_tag_file.content | b64decode | trim }}"
+
+    - name: Report rollback target
+      ansible.builtin.debug:
+        msg: "Rolling back to {{ tag }}"
+
+    - name: Run the shared deploy steps (with the previous tag)
+      ansible.builtin.import_tasks: deploy_tasks.yml

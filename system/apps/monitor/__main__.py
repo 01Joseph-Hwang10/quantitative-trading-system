@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -10,7 +11,20 @@ def main() -> None:
     from streamlit.web import cli as streamlit_cli
 
     app_path = Path(__file__).with_name("app.py").resolve()
-    sys.argv = ["streamlit", "run", str(app_path), *sys.argv[1:]]
+    # Inside a container the app must listen on all interfaces; the compose
+    # port mapping publishes it on the host's loopback only. Overridable.
+    server_address = os.environ.get("STREAMLIT_SERVER_ADDRESS", "0.0.0.0")
+    headless = os.environ.get("STREAMLIT_SERVER_HEADLESS", "true")
+    sys.argv = [
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.address",
+        server_address,
+        "--server.headless",
+        headless,
+        *sys.argv[1:],
+    ]
     sys.exit(streamlit_cli.main())
 
 

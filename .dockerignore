@@ -1,0 +1,15 @@
+# Never bake runtime data, secrets, or dev artifacts into the image.
+.venv
+data
+.git
+.env
+.env.*
+!.env.example
+specs
+notebooks
+terraform
+ansible
+tests
+.DS_Store
+__pycache__
+*.py[oc]

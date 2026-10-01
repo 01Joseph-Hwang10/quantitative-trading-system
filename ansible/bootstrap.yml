@@ -1,0 +1,104 @@
+---
+# One-time VM bootstrap (idempotent): base packages, swap, Docker, Google
+# Cloud SDK with Artifact Registry credential helper, app directories.
+- name: Bootstrap quantitative-trading VM
+  hosts: vm
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - unzip
+        state: present
+        update_cache: true
+
+    # e2-micro has 1 GB RAM; swap keeps two Python processes comfortable.
+    - name: Check whether swap is already active
+      ansible.builtin.command: swapon --show=NAME,SIZE --noheadings
+      register: swap_status
+      changed_when: false
+
+    - name: Create swap file
+      ansible.builtin.command:
+        cmd: "fallocate -l {{ swap_size_mb }}M /swapfile"
+        creates: /swapfile
+      when: swap_status.stdout | length == 0
+
+    - name: Format swap file
+      ansible.builtin.command: mkswap /swapfile
+      when: swap_status.stdout | length == 0
+      changed_when: true
+
+    - name: Set swap file permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+      when: swap_status.stdout | length == 0
+
+    - name: Enable swap
+      ansible.builtin.command: swapon /swapfile
+      when: swap_status.stdout | length == 0
+      changed_when: true
+
+    - name: Persist swap in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+        state: present
+      when: swap_status.stdout | length == 0
+
+    - name: Create Docker apt keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Add Docker apt GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/etc/apt/keyrings/docker.asc
+          arch=amd64] https://download.docker.com/linux/debian
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+
+    - name: Install Docker Engine and compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker is running and enabled
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create application directory (uid 1000 = container 'app' user)
+      ansible.builtin.file:
+        path: "{{ app_dir }}/data"
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+
+    # NOTE: Artifact Registry authentication does not need the Google Cloud
+    # SDK — deploy_tasks.yml logs docker in with the VM service account token
+    # from the metadata server. The GCE image's own google-cloud.list repo
+    # (unsigned, image-managed) is left untouched.

@@ -31,13 +31,13 @@ REGULAR_SESSION_END = (15, 30)  # 15:30 KST
 
 class TossBroker:
     def __init__(self, settings: Settings) -> None:
-        if not settings.toss_client_id or not settings.toss_client_secret:
+        if not settings.tosssec_client_id or not settings.tosssec_client_secret:
             raise ValueError("TOSSSEC_CLIENT_ID and TOSSSEC_CLIENT_SECRET are required when BROKER=toss")
         self.settings = settings
         self.timezone = ZoneInfo(settings.timezone)
         self._config = ClientConfig(
-            client_id=settings.toss_client_id,
-            client_secret=settings.toss_client_secret,
+            client_id=settings.tosssec_client_id,
+            client_secret=settings.tosssec_client_secret,
         )
         self._client = TossClient(self._config)
         self._account: AccountClient | None = None

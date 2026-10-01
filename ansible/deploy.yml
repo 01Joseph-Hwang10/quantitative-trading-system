@@ -1,0 +1,17 @@
+---
+# Deploy the deploy steps via a shared task file; deploy.yml keeps the same
+# import for clarity.
+- name: Deploy quantitative-trading stack
+  hosts: vm
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Require image tag
+      ansible.builtin.fail:
+        msg: "Run with -e tag=<git-sha> (e.g. via `just deploy`)"
+      when: tag is not defined
+
+  tasks:
+    - name: Run the shared deploy steps
+      ansible.builtin.import_tasks: deploy_tasks.yml

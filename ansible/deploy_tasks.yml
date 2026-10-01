@@ -1,0 +1,106 @@
+---
+# Shared deploy steps (imported by deploy.yml and update.yml). Assumes `tag`
+# is defined.
+- name: Sync production env file (BROKER=toss)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../.env.production"
+    dest: "{{ app_dir }}/.env"
+    mode: "0600"
+
+- name: Read currently deployed tag (if any)
+  ansible.builtin.slurp:
+    src: "{{ app_dir }}/current_tag"
+  register: current_tag_file
+  failed_when: false
+
+- name: Preserve previous tag for manual rollback
+  ansible.builtin.copy:
+    content: "{{ current_tag_file.content | b64decode | trim }}"
+    dest: "{{ app_dir }}/previous_tag"
+    mode: "0644"
+  when:
+    - current_tag_file.content is defined
+    - (current_tag_file.content | b64decode | trim) != tag
+
+- name: Record current tag
+  ansible.builtin.copy:
+    content: "{{ tag }}"
+    dest: "{{ app_dir }}/current_tag"
+    mode: "0644"
+
+- name: Render compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ app_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Log in to Artifact Registry with the VM service account token
+  ansible.builtin.shell: |
+    set -o pipefail
+    token=$(curl -fsS -H 'Metadata-Flavor: Google' \
+      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+      | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+    echo "$token" | docker login -u oauth2accesstoken --password-stdin \
+      https://us-central1-docker.pkg.dev
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Pull the image
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "{{ app_dir }}"
+  changed_when: true
+
+- name: Start the stack
+  ansible.builtin.command:
+    cmd: docker compose up -d --remove-orphans
+    chdir: "{{ app_dir }}"
+  changed_when: true
+
+- name: Give containers time to start
+  ansible.builtin.pause:
+    seconds: 20
+
+- name: Verify service health
+  block:
+    - name: Check monitor HTTP health
+      ansible.builtin.command:
+        cmd: curl -fsS http://127.0.0.1:8501/_stalive/health
+      register: monitor_health
+      retries: 5
+      delay: 10
+      until: monitor_health.rc == 0
+      changed_when: false
+
+    - name: List running services
+      ansible.builtin.command:
+        cmd: docker compose ps --services --status running
+        chdir: "{{ app_dir }}"
+      register: running_services
+      changed_when: false
+
+    - name: Assert both services are running
+      ansible.builtin.assert:
+        that:
+          - "'trader' in running_services.stdout_lines"
+          - "'monitor' in running_services.stdout_lines"
+        success_msg: "Deploy healthy: {{ tag }} running (trader, monitor)"
+        fail_msg: >-
+          Services not healthy after deploy of {{ tag }}.
+          Previous tag preserved in {{ app_dir }}/previous_tag.
+          Run: just rollback
+
+  rescue:
+    - name: Dump recent container logs for diagnostics
+      ansible.builtin.command:
+        cmd: docker compose logs --tail=50
+        chdir: "{{ app_dir }}"
+      changed_when: false
+
+    - name: Fail with error information and rollback pointer
+      ansible.builtin.fail:
+        msg: >-
+          Deploy of {{ tag }} FAILED — see logs above for the error.
+          The previous version is still recorded in
+          {{ app_dir }}/previous_tag. Restore it with: just rollback

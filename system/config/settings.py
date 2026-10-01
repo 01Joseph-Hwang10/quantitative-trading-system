@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv(".env")
+# `.env` is the local (BROKER=mock) file; `.env.production` (BROKER=toss) is
+# synced to the VM by Ansible and injected into containers via compose
+# `env_file`. ENV_FILE overrides which file Settings reads locally.
+# No module-level load_dotenv: pydantic-settings reads the env file itself,
+# so a selected file is never shadowed by another file's values in os.environ.
 
 # Notebook strategy window start (strategy_1.ipynb WINDOW["start"]).
 DEFAULT_FEED_START_DATE = "2022-10-01"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=os.environ.get("ENV_FILE", ".env"), extra="ignore"
+    )
 
-    # Broker settings
+    # Broker settings — field names match the env var names (case-insensitive).
     broker: str = "mock"  # "mock" | "toss"
-    toss_client_id: str | None = None
-    toss_client_secret: str | None = None
+    tosssec_client_id: str | None = None
+    tosssec_client_secret: str | None = None
 
     # Monitor settings
     authorized_users: str = ""  # comma-separated email addresses

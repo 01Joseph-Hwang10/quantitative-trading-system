@@ -16,6 +16,7 @@ import signal
 import sqlite3
 import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
@@ -35,11 +36,13 @@ class Runner:
         decision_schedule_cron: str,
         feed_update_schedule_cron: str,
         timezone_name: str = "Asia/Seoul",
+        heartbeat_path: Path | None = None,
     ) -> None:
         self.trader = trader
         self.decision_schedule_cron = decision_schedule_cron
         self.feed_update_schedule_cron = feed_update_schedule_cron
         self.timezone = ZoneInfo(timezone_name)
+        self.heartbeat_path = heartbeat_path
         self._stop_requested = False
 
     def run_forever(self) -> None:
@@ -51,7 +54,9 @@ class Runner:
             self.feed_update_schedule_cron,
             self.timezone,
         )
+        self._touch_heartbeat()
         while not self._stop_requested:
+            self._touch_heartbeat()
             next_decision = self._next_fire(self.decision_schedule_cron)
             next_feed = self._next_fire(self.feed_update_schedule_cron)
             target, is_decision_cycle = (next_decision, True) if next_decision <= next_feed else (next_feed, False)
@@ -71,6 +76,16 @@ class Runner:
         logger.info("Trader daemon stopped")
 
     # ── helpers ────────────────────────────────────────────────────────────
+    def _touch_heartbeat(self) -> None:
+        """Liveness marker for the compose healthcheck (best effort)."""
+        if self.heartbeat_path is None:
+            return
+        try:
+            self.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+            self.heartbeat_path.write_text(datetime.now(self.timezone).isoformat())
+        except OSError:
+            logger.exception("Failed to write heartbeat file")
+
     def _next_fire(self, expression: str) -> datetime:
         now = datetime.now(self.timezone)
         return croniter(expression, now).get_next(datetime)

@@ -1,0 +1,35 @@
+services:
+  trader:
+    image: {{ image_base }}:{{ tag }}
+    command: python -m system.apps.trader
+    env_file: .env
+    environment:
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "system.apps.trader", "healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  monitor:
+    image: {{ image_base }}:{{ tag }}
+    command: python -m system.apps.monitor
+    env_file: .env
+    environment:
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      # Loopback only — the monitor is reached via SSH port-forwarding.
+      - "127.0.0.1:8501:8501"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stalive/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

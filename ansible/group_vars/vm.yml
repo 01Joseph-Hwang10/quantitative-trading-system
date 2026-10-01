@@ -1,0 +1,3 @@
+app_dir: /opt/quantitative-trading
+image_base: us-central1-docker.pkg.dev/quantitative-trading-510302/quantitative-trading/app
+swap_size_mb: 2048
