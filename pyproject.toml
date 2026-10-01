@@ -5,15 +5,20 @@ description = "Quantitative Trading System"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "croniter>=6.2.4",
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
+    "python-dateutil>=2.9.0.post0",
     "pytrends>=4.9.2",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.1",
     "seaborn>=0.13.2",
     "statsmodels>=0.15.0",
+    "streamlit>=1.64.0",
     "ta-lib>=0.7.1",
+    "tenacity>=9.1.4",
+    "tossinvest>=0.1.0",
     "yfinance>=1.7.0",
 ]
 
