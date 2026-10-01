@@ -1,45 +1,52 @@
-"""
-Declare environment variables here.
+"""Application settings loaded from environment variables (`.env`)."""
 
-Example:
+from __future__ import annotations
 
-```python
-from typing import Annotated
+from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import AfterValidator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv(".env")
 
-
-def sanitize_url(url: str | None) -> str | None:
-    return url.rstrip("/") if url else url
+# Notebook strategy window start (strategy_1.ipynb WINDOW["start"]).
+DEFAULT_FEED_START_DATE = "2022-10-01"
 
 
 class Settings(BaseSettings):
-    # Server settings
-    env: str = "live"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Broker settings
+    broker: str = "mock"  # "mock" | "toss"
+    toss_client_id: str | None = None
+    toss_client_secret: str | None = None
+
+    # Monitor settings
+    authorized_users: str = ""  # comma-separated email addresses
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "http://localhost:8501/oauth2callback"
+
+    # Runtime settings
+    data_dir: Path = Path("./data")
+    trader_enabled: bool = True  # initial value used to seed app_state
+    decision_schedule_cron: str = "0 15 * * 1-5"  # 15:00 KST, weekdays
+    feed_update_schedule_cron: str = "0 9 * * 1-5"  # 09:00 KST catch-up
+    timezone: str = "Asia/Seoul"
     log_level: str = "INFO"
-    api_key: str | None = None
 
-    # Airflow settings
-    airflow_url: Annotated[str, AfterValidator(sanitize_url)]
-    airflow_username: str
-    airflow_password: str
-    airflow_fernet_key: str
+    @property
+    def authorized_user_list(self) -> list[str]:
+        return [email.strip() for email in self.authorized_users.split(",") if email.strip()]
 
-    # Database settings
-    db_user: str
-    db_password: str
-    db_host: str
-    db_port: int | None = None
-    db_name: str | None = None
+    @property
+    def metadata_db_path(self) -> Path:
+        return self.data_dir / "metadata.db"
 
-    # Zitadel config
-    zitadel_domain: Annotated[str, AfterValidator(sanitize_url)]
-    zitadel_api_access_key_id: str
-    zitadel_api_access_secret_key: str
-```
+    @property
+    def feed_db_path(self) -> Path:
+        return self.data_dir / "feed.db"
 
-"""
+    def ensure_data_dir(self) -> Path:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        return self.data_dir

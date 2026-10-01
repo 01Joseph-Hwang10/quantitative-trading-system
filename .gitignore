@@ -15,5 +15,11 @@ wheels/
 # Temp files
 .tmp/
 
+# Runtime data (sqlite dbs, broker state)
+data/
+
+# Streamlit secrets (materialized from env vars by the monitor)
+.streamlit/secrets.toml
+
 # MacOS
 .DS_Store
