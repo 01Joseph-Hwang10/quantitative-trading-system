@@ -45,9 +45,13 @@ CREATE TABLE IF NOT EXISTS app_state (
 
 
 def connect(metadata_db_path: Path) -> sqlite3.Connection:
-    """Open (and initialize) the metadata database."""
+    """Open (and initialize) the metadata database.
+
+    `check_same_thread=False` lets Streamlit fragments (auto-refresh reruns in a
+    worker thread) reuse connections opened on the main script thread.
+    """
     metadata_db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(metadata_db_path)
+    conn = sqlite3.connect(metadata_db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     conn.commit()

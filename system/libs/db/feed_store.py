@@ -24,9 +24,13 @@ SCALAR_COLUMNS = "(date TEXT PRIMARY KEY, value REAL)"
 
 
 def connect(feed_db_path: Path) -> sqlite3.Connection:
-    """Open (and initialize) the feed database."""
+    """Open (and initialize) the feed database.
+
+    `check_same_thread=False` lets Streamlit fragments (auto-refresh reruns in a
+    worker thread) reuse connections opened on a previous script-run thread.
+    """
     feed_db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(feed_db_path)
+    conn = sqlite3.connect(feed_db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute(
         "CREATE TABLE IF NOT EXISTS _metadata ("
