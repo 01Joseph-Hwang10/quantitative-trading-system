@@ -32,6 +32,16 @@ resource "google_artifact_registry_repository" "docker" {
   description   = "Quantitative trading system application images"
   format        = "DOCKER"
 
+  # Retention: prune old image versions, keeping only the 5 most recent.
+  # Cleanup runs on upload and on a daily schedule, so pruning is eventual.
+  cleanup_policies {
+    id     = "keep-latest-5"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+
   depends_on = [google_project_service.artifactregistry]
 }
 

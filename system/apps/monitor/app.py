@@ -12,6 +12,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 from functools import partial
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -27,6 +28,9 @@ from system.libs.feeds.registry import feed_names
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Quant Trading Monitor", page_icon="📈", layout="wide")
+
+# Text logo shown above the sidebar navigation (and the collapsed-sidebar header).
+st.logo(str(Path(__file__).with_name("assets") / "logo.svg"))
 
 # Performance page timespan selector: label → lookback in days ("YTD"/"All" special).
 TIMESPAN_OPTIONS = ("1M", "3M", "6M", "YTD", "1Y", "All")
@@ -73,7 +77,6 @@ def main() -> None:
         st.stop()
 
     connections = _monitor_connections(settings)
-    st.sidebar.markdown("# QT Monitor")
     st.sidebar.write(f"👤 {email}")
     st.sidebar.button("Log out", on_click=st.logout)
     st.sidebar.toggle("Auto-refresh (60s)", key="auto_refresh")
