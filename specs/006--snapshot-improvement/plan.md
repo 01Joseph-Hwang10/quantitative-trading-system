@@ -30,7 +30,7 @@ element.
 | `system/apps/trader/broker/mock.py` | `get_day_bar` returns a flat `DayBar` from `price_lookup` (mock determinism preserved). |
 | `system/libs/feeds/yfinance.py` | `snapshot()` prefers `broker.get_day_bar(...)` (duck-typed via `getattr`, so stub brokers without the method keep working) and falls back to the existing flat last-price bar. Docstring notes the auto_adjust-vs-raw-price caveat for `0072R0.KS`. |
 | `tests/test_feeds.py` | New: day-bar preferred over flat bar; fallback when `get_day_bar` → `None`; mock day bar is flat. |
-| `tests/test_broker_toss.py` | **New.** Pure-function tests for `day_bar_from_candles`: picks today's candle, rejects the previous session's candle (weekend case), empty list, KST timezone conversion of non-KST-stamped timestamps. Module-level `pytest.mark.skipif`: **skipped by default** because the TossInvest API enforces an include-style IP allowlist (no "exclude and allow all"), so any change of the local machine's network egress IP can change behavior of anything touching the Toss API; opt in with `RUN_TOSS_BROKER_TESTS=1` on an allowlisted network. |
+| `tests/test_broker_toss.py` | **New.** Pure-function tests for `day_bar_from_candles`: picks today's candle, rejects the previous session's candle (weekend case), empty list, KST timezone conversion of non-KST-stamped timestamps. Always-on (no skip directive): the tests are network-free and environment-independent — an initial include-style-IP-allowlist skip directive was added and then rolled back after confirming no Toss API call exists on the test path. |
 
 `trader.py` needed no change — `apply_snapshot` already appends the snapshot
 row ephemerally via `with_row`.

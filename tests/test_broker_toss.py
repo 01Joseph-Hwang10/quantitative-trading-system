@@ -4,33 +4,18 @@ Pure-function tests over `day_bar_from_candles` (no network, no credentials).
 The mapping must accept only a candle stamped today (KST): on weekends and
 holidays the candles list's newest entry is the previous session's completed
 bar and must never be mistaken for an in-progress bar.
-
-Skipped by default: the TossInvest API enforces an **include**-style IP
-allowlist (no "exclude and allow all"), so any change to this machine's
-network egress IP can change behavior of anything touching the Toss API.
-Opt in explicitly with `RUN_TOSS_BROKER_TESTS=1` on an allowlisted network.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from tossinvest.model.market_data import Candle
 
 from system.apps.trader.broker.tossinvest import day_bar_from_candles
 
 KST = ZoneInfo("Asia/Seoul")
-
-pytestmark = pytest.mark.skipif(
-    os.environ.get("RUN_TOSS_BROKER_TESTS", "").lower() not in {"1", "true", "yes"},
-    reason="TossInvest API requires include-style IP allowlisting; test results "
-    "can differ with the local machine's network environment. Set "
-    "RUN_TOSS_BROKER_TESTS=1 on an allowlisted network to run.",
-)
 
 
 def make_candle(day: date, open_=12_200, high=12_350, low=12_100, close=12_300, volume=850_000):
