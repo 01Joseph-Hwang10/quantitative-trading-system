@@ -46,7 +46,27 @@ class OhlcvFeed(DataFeed):
         return rows
 
     def snapshot(self, broker) -> pd.Series | None:
-        """Today's provisional bar: OHLC = last broker price, volume = 0."""
+        """Today's provisional bar: real intraday OHLCV when the broker can
+        provide a day bar, degrading to a flat last-price bar otherwise.
+
+        Note: yfinance historical bars are auto_adjust-adjusted while broker
+        prices are raw. For 0072R0.KS (spot-gold ETF, no splits/dividends) the
+        adjustment factor is 1; re-check this if the trading ticker changes.
+        """
+        get_day_bar = getattr(broker, "get_day_bar", None)
+        if get_day_bar is not None:
+            day_bar = get_day_bar(self.ticker)
+            if day_bar is not None:
+                return pd.Series(
+                    {
+                        "open": day_bar.open,
+                        "high": day_bar.high,
+                        "low": day_bar.low,
+                        "close": day_bar.close,
+                        "volume": day_bar.volume,
+                    },
+                    name=pd.Timestamp(day_bar.date),
+                )
         price = broker.get_last_price(self.ticker)
         if price is None:
             return None

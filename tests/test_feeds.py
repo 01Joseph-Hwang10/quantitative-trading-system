@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 
+from system.apps.trader.broker.base import DayBar
 from system.libs.db import feed_store
 from system.libs.feeds.macro import ScalarFeed
 from system.libs.feeds.registry import build_feed, load_feed
 from system.libs.feeds.yfinance import OhlcvFeed
-from tests.conftest import make_ohlcv_frame, store_ohlcv
+from tests.conftest import FixedPriceMockBroker, make_ohlcv_frame, store_ohlcv, store_scalar
 
 
 class StubOhlcvFeed(OhlcvFeed):
@@ -97,6 +99,51 @@ def test_snapshot_returns_none_without_price(feed_conn, mock_broker):
     mock_broker.price_lookup = lambda symbol: None
     feed = build_feed("ohlcv_0072R0KS").load(feed_conn)
     assert feed.snapshot(mock_broker) is None
+
+
+def test_snapshot_prefers_broker_day_bar(feed_conn):
+    """A real intraday DayBar beats the flat last-price fallback bar."""
+
+    class DayBarBroker(FixedPriceMockBroker):
+        def get_day_bar(self, symbol):
+            return DayBar(
+                date=date.today(),
+                open=12_200.0,
+                high=12_350.0,
+                low=12_100.0,
+                close=12_300.0,
+                volume=850_000,
+            )
+
+    broker = DayBarBroker(Path("/tmp/unused-positions.json"))
+    feed = build_feed("ohlcv_0072R0KS").load(feed_conn)
+    row = feed.snapshot(broker)
+    assert row is not None
+    assert row["open"] == 12_200.0
+    assert row["high"] == 12_350.0
+    assert row["low"] == 12_100.0
+    assert row["close"] == 12_300.0
+    assert row["volume"] == 850_000
+    assert row.name.date() == date.today()
+
+
+def test_snapshot_falls_back_to_flat_bar_without_day_bar(feed_conn, mock_broker):
+    """get_day_bar → None (error/holiday degradation) keeps the flat bar."""
+    mock_broker.get_day_bar = lambda symbol: None
+    feed = build_feed("ohlcv_0072R0KS").load(feed_conn)
+    row = feed.snapshot(mock_broker)
+    assert row is not None
+    assert row["open"] == row["high"] == row["low"] == row["close"] == 10_000.0
+    assert row["volume"] == 0
+
+
+def test_mock_broker_day_bar_is_flat(feed_conn, mock_broker):
+    day_bar = mock_broker.get_day_bar("0072R0")
+    assert day_bar is not None
+    assert day_bar.date == date.today()
+    assert day_bar.open == day_bar.high == day_bar.low == day_bar.close == 10_000.0
+    assert day_bar.volume == 0
+
 
 
 def test_with_row_appends_provisional_bar(feed_conn, mock_broker):

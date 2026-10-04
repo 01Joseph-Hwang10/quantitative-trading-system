@@ -7,7 +7,25 @@ tossinvest adapter — never exercised against the live API unless BROKER=toss).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Protocol, runtime_checkable
+
+
+@dataclass
+class DayBar:
+    """In-progress daily bar (session OHLC so far + cumulative volume).
+
+    Used to build the trader's same-day provisional bar (see
+    `OhlcvFeed.snapshot`) with real intraday open/high/low instead of a flat
+    last-price bar.
+    """
+
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float  # freshest last traded price
+    volume: float  # cumulative session volume
 
 
 @dataclass
@@ -56,6 +74,14 @@ class BrokerClient(Protocol):
     def get_account(self) -> AccountState: ...
 
     def get_last_price(self, symbol: str) -> float | None: ...
+
+    def get_day_bar(self, symbol: str) -> DayBar | None:
+        """Today's in-progress daily bar, or None if unavailable.
+
+        Concrete brokers may degrade to None (e.g. outside a trading session,
+        market-data endpoint failure); callers must fall back gracefully.
+        """
+        ...
 
     def is_market_open(self) -> bool: ...
 

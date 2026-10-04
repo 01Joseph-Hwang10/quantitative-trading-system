@@ -8,12 +8,12 @@ happen at the last known price provided by the injected `price_lookup`.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from system.apps.trader.broker.base import AccountState, OrderResult, Position
+from system.apps.trader.broker.base import AccountState, DayBar, OrderResult, Position
 
 SEED_CASH = 20_000_000.0  # KRW seed, matching the notebook's scale of a ~₩20M account
 
@@ -55,6 +55,20 @@ class MockBroker:
 
     def get_last_price(self, symbol: str) -> float | None:
         return self.price_lookup(symbol)
+
+    def get_day_bar(self, symbol: str) -> DayBar | None:
+        """Flat provisional bar from the price lookup (mock has no intraday data)."""
+        price = self.price_lookup(symbol)
+        if price is None:
+            return None
+        return DayBar(
+            date=date.today(),
+            open=price,
+            high=price,
+            low=price,
+            close=price,
+            volume=0,
+        )
 
     def is_market_open(self) -> bool:
         # Mock approximation: KRX regular session, weekdays only.

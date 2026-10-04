@@ -11,7 +11,8 @@ business day the decision at 15:00 KST is inside the session.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import logging
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from tossinvest import (
@@ -23,10 +24,47 @@ from tossinvest import (
     TossClient,
 )
 
-from system.apps.trader.broker.base import AccountState, OrderResult, Position
+from system.apps.trader.broker.base import AccountState, DayBar, OrderResult, Position
 from system.config.settings import Settings
 
 REGULAR_SESSION_END = (15, 30)  # 15:30 KST
+
+# Verified against the live API on 2026-10-04: "1d" returns daily candles
+# newest-first; the current session's in-progress candle carries real
+# intraday open/high/low and cumulative volume. Minute candles ("1m") exist
+# but carry volume=0 for this product, so daily candles are the right source.
+DAILY_CANDLE_INTERVAL = "1d"
+
+logger = logging.getLogger(__name__)
+
+
+def day_bar_from_candles(candles, today: date, timezone: ZoneInfo) -> DayBar | None:
+    """Pick today's in-progress daily candle and map it to a DayBar.
+
+    `candles` are tossinvest Candle models, newest-first. Only a candle whose
+    timestamp is **today (KST)** is accepted — on weekends/holidays the newest
+    candle is the previous session's completed bar and must NOT be mistaken
+    for an in-progress bar. Returns None when there is no candle for today.
+    """
+    for candle in candles:
+        candle_date = candle.timestamp.astimezone(timezone).date()
+        if candle_date == today:
+            return DayBar(
+                date=today,
+                open=_dec_to_float(candle.open_price),
+                high=_dec_to_float(candle.high_price),
+                low=_dec_to_float(candle.low_price),
+                close=_dec_to_float(candle.close_price),
+                volume=_dec_to_float(candle.volume),
+            )
+        if candle_date < today:
+            break  # newest-first: a strictly older candle means no bar today
+    return None
+
+
+def _dec_to_float(value) -> float:
+    """tossinvest Dec wraps a Decimal with a `.value` accessor (no __float__)."""
+    return float(value.value)
 
 
 class TossBroker:
@@ -68,18 +106,42 @@ class TossBroker:
             Position(
                 symbol=item.symbol,
                 quantity=int(item.quantity),
-                avg_price=float(item.average_purchase_price),
-                last_price=float(item.last_price),
+                avg_price=_dec_to_float(item.average_purchase_price),
+                last_price=_dec_to_float(item.last_price),
             )
             for item in holdings.items
         ]
-        return AccountState(cash=float(buying_power.cash_buying_power), positions=positions)
+        return AccountState(cash=_dec_to_float(buying_power.cash_buying_power), positions=positions)
 
     def get_last_price(self, symbol: str) -> float | None:
         prices = self._run(self._client.prices([symbol]))
         if not prices:
             return None
-        return float(prices[0].last_price)
+        return _dec_to_float(prices[0].last_price)
+
+    def get_day_bar(self, symbol: str) -> DayBar | None:
+        """Today's in-progress daily bar, or None when unavailable.
+
+        Degrades to None whenever the bar can't be determined (API error, no
+        candle for today — e.g. weekend/holiday/market not yet open) so the
+        caller falls back to the flat last-price snapshot bar.
+        """
+        try:
+            page = self._run(
+                self._client.candles(symbol, DAILY_CANDLE_INTERVAL, count=1)
+            )
+        except Exception as error:  # noqa: BLE001 - degrade, never break the cycle
+            logger.warning("get_day_bar(%s) candles call failed: %s", symbol, error)
+            return None
+        today = datetime.now(self.timezone).date()
+        day_bar = day_bar_from_candles(page.candles, today, self.timezone)
+        if day_bar is None:
+            return None
+        # Overlay the freshest last price so close is not stale by one candle.
+        last_price = self.get_last_price(symbol)
+        if last_price is not None and last_price > 0:
+            day_bar.close = last_price
+        return day_bar
 
     def is_market_open(self) -> bool:
         calendar = self._run(self._client.kr_market_calendar())
