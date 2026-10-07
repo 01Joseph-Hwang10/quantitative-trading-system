@@ -113,6 +113,21 @@ default:
     gcloud compute ssh {{ vm_name }} --zone {{ zone }} --project {{ project }} \
       --tunnel-through-iap --quiet -- -L 8501:localhost:8501 -N
 
+# ── DB sync (local ↔ VM) ───────────────────────────────────────────────────
+
+# Two-way sync of data/{metadata,feed}.db with the VM. Bare `just db` shows
+# usage + status. Verbs: status | pull | push | sync | watch, optional db
+# filter (metadata|feed|all) and flags (--force, --overwrite). During KRX
+# market hours: sync/push refused (--force overrides), watch warns, pull ok.
+# See specs/008--db-sync/draft.md.
+@db *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    eval "$(ctx use quantitative-trading --export --confirm 2>/dev/null)"
+    QT_PROJECT="{{ project }}" QT_ZONE="{{ zone }}" QT_VM="{{ vm_name }}" \
+      QT_APP_DIR="{{ app_dir }}" \
+      exec bash scripts/db_sync.sh {{ args }}
+
 # ── Deploy & day-2 operations ────────────────────────────────────────────────
 
 # Full first-time deploy: bootstrap the VM, then deploy the current build.
