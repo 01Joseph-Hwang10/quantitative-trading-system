@@ -30,6 +30,27 @@ trader's schedules, decision flow, and `snapshot()` behavior are unchanged).
   today's row is covered by `apply_snapshot`/`snapshot()` (spec 006), which is
   strictly better (real intraday OHLCV from the broker).
 
+## Relation to spec 006 (snapshot improvement)
+
+007 **enforces** 006's invariant rather than merely coexisting with it:
+"yfinance owns completed daily bars; the broker owns live data."
+
+- `apply_snapshot` (trader.py) appends the broker day bar only when
+  `last_date < today`. Before 007, the 15:00 KST decision cycle's
+  `update_feeds` could fetch today's intraday `0072R0.KS` bar from yfinance
+  (KRX session open), setting `last_date = today` and **silently skipping**
+  the broker snapshot — the strategy then decided on an auto-adjusted
+  yfinance bar instead of 006's raw-price broker OHLCV. The yesterday-clamp
+  makes that path impossible.
+- Flow after 007: 09:00 KST update stores through yesterday; the 15:00
+  decision finds `last_date = yesterday < today` → broker `get_day_bar` row
+  appended ephemerally via `with_row` (006's flow, unchanged); the next
+  morning's update re-fetches it from yfinance as a completed bar.
+- Shared pre-existing caveat (flagged in both specs): broker snapshot prices
+  are raw while stored yfinance bars are `auto_adjust=True` — safe only
+  because `0072R0.KS` has adjustment factor 1; re-check if the ticker
+  changes. Unchanged by 007.
+
 ## Out of scope
 
 - Suppressing the `yfinance` logger globally (would hide real errors).
