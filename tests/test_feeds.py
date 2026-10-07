@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import logging
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +37,7 @@ def test_load_empty_feed_returns_empty_frame(feed_conn):
     assert feed.feed_source_params["ticker"] == "0072R0.KS"
 
 
-def test_update_fetches_only_missing_range(feed_conn, monkeypatch):
+def test_update_fetches_only_missing_range(feed_conn):
     stored = make_ohlcv_frame(days=30)
     stored = stored.iloc[:25]  # db has 25 days; upstream has 30
     store_ohlcv(feed_conn, "ohlcv_0072R0KS", stored)
@@ -55,12 +56,81 @@ def test_update_fetches_only_missing_range(feed_conn, monkeypatch):
         for index, row in full.iterrows()
     ]
 
+    # The default range ends yesterday (upstream daily bars are completed
+    # sessions only), so today's row is intentionally not requested.
+    last = stored.index[-1].date()
+    yesterday = date.today() - timedelta(days=1)
+    expected = sum(1 for index in full.index if last < index.date() <= yesterday)
+
     inserted = feed.update(feed_conn)
-    assert inserted == 5
-    assert feed_store.get_feed_meta(feed_conn, "ohlcv_0072R0KS")["row_count"] == 30
+    assert inserted == expected
+    assert feed_store.get_feed_meta(feed_conn, "ohlcv_0072R0KS")["row_count"] == 25 + expected
 
     # Second update: nothing new upstream → nothing stored.
     assert feed.update(feed_conn) == 0
+
+
+def test_update_requests_only_completed_days(feed_conn):
+    """The default fetch range ends yesterday: today's bar comes from snapshot()."""
+    calls: list[tuple[date, date]] = []
+
+    class RecordingFeed(StubOhlcvFeed):
+        def fetch_rows(self, start, end):
+            calls.append((start, end))
+            return []
+
+    # Store through two days ago so the fetch path runs (yesterday = range end).
+    cutoff = date.today() - timedelta(days=2)
+    yesterday = date.today() - timedelta(days=1)
+    stored = make_ohlcv_frame(days=5)
+    store_ohlcv(feed_conn, "ohlcv_0072R0KS", stored[[d <= cutoff for d in stored.index.date]])
+
+    feed = RecordingFeed(name="ohlcv_0072R0KS", source_params={"ticker": "0072R0.KS"}).load(feed_conn)
+    assert feed.update(feed_conn) == 0
+    assert calls == [(feed.index[-1].date() + timedelta(days=1), yesterday)]
+
+
+def test_update_makes_no_request_when_caught_up(feed_conn):
+    """Already caught up through yesterday → zero upstream calls (no yfinance ERROR noise)."""
+    calls: list[tuple[date, date]] = []
+
+    class RecordingFeed(StubOhlcvFeed):
+        def fetch_rows(self, start, end):
+            calls.append((start, end))
+            return []
+
+    stored = make_ohlcv_frame(days=5)
+    yesterday = date.today() - timedelta(days=1)
+    store_ohlcv(feed_conn, "ohlcv_0072R0KS", stored[[d <= yesterday for d in stored.index.date]])
+
+    feed = RecordingFeed(name="ohlcv_0072R0KS", source_params={"ticker": "0072R0.KS"}).load(feed_conn)
+    assert feed.update(feed_conn) == 0
+    assert calls == []
+
+
+def test_update_fetch_error_is_swallowed_and_logged(feed_conn, caplog):
+    """One flaky ticker logs a warning and returns 0 without aborting siblings."""
+
+    class FailingFeed(StubOhlcvFeed):
+        def fetch_rows(self, start, end):
+            raise RuntimeError("upstream down")
+
+    # Store through two days ago so the fetch path runs (yesterday = range end).
+    cutoff = date.today() - timedelta(days=2)
+    stored = make_ohlcv_frame(days=5)
+    store_ohlcv(feed_conn, "ohlcv_0072R0KS", stored[[d <= cutoff for d in stored.index.date]])
+
+    feed = FailingFeed(name="ohlcv_0072R0KS", source_params={"ticker": "0072R0.KS"}).load(feed_conn)
+    with caplog.at_level(logging.WARNING, logger="system.libs.feeds.base"):
+        assert feed.update(feed_conn) == 0
+    assert any("fetch failed" in record.getMessage() for record in caplog.records)
+
+    # A sibling feed in the same update loop still updates.
+    sibling = StubOhlcvFeed(name="ohlcv_411060KS", source_params={"ticker": "411060.KS"})
+    sibling.upstream_rows = [
+        {"date": (date.today() - timedelta(days=1)).isoformat(), "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 0}
+    ]
+    assert sibling.update(feed_conn) == 1
 
 
 def test_load_hydrates_stored_rows(feed_conn):

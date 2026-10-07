@@ -6,6 +6,7 @@ A feed is pure market data — account/position state never lives here.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
     from system.apps.trader.broker.base import BrokerClient
 
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
+
+logger = logging.getLogger(__name__)
 
 
 def now_utc() -> datetime:
@@ -113,13 +116,28 @@ class DataFeed(pd.DataFrame):
 
         Returns the number of newly stored rows. Idempotent: a second call
         without new upstream data stores nothing.
+
+        Upstream daily bars exist only for completed sessions (yfinance
+        publishes them after close), so the default range ends *yesterday*;
+        today's provisional row comes from `snapshot()` (broker), never from
+        this fetch. An explicit `end` overrides the default.
         """
         last = feed_store.last_date(conn, self.feed_name)
         fetch_start = last + timedelta(days=1) if last else self.START_DATE_DEFAULT
-        fetch_end = end or date.today()
+        fetch_end = end or date.today() - timedelta(days=1)
         if fetch_start > fetch_end:
             return 0
-        rows = self.fetch_rows(fetch_start, fetch_end)
+        try:
+            rows = self.fetch_rows(fetch_start, fetch_end)
+        except Exception:  # noqa: BLE001 - one flaky ticker must not abort sibling feeds
+            logger.warning(
+                "Feed %s: fetch failed for [%s, %s]",
+                self.feed_name,
+                fetch_start,
+                fetch_end,
+                exc_info=True,
+            )
+            return 0
         if last is not None:
             rows = [row for row in rows if date.fromisoformat(str(row["date"])[:10]) > last]
         if rows:
