@@ -1,6 +1,6 @@
 # Done — `just db`: two-way sync of `metadata.db` / `feed.db` between local and VM
 
-Implementation record for `draft.md` (which holds the motivation, rejected
+Implementation record for `plan.md` (which holds the motivation, rejected
 options, and safety model — not repeated here). Everything below is what
 actually shipped.
 
@@ -86,7 +86,7 @@ lie" rule from the draft.
 
 ## Verification status
 
-Syntax-checked (`bash -n`). The live checklist in `draft.md` (status
+Syntax-checked (`bash -n`). The live checklist in `plan.md` (status
 truthfulness, backup creation, market-hours refusals, torn-write retry,
 divergence stop, bare `just db` no-op) requires the VM and is exercised via
 the commands above on first real use.

@@ -1,4 +1,8 @@
-# Draft — `just db`: two-way sync of `metadata.db` / `feed.db` between local and VM
+# Plan — `just db`: two-way sync of `metadata.db` / `feed.db` between local and VM
+
+Original agent draft — merged from `draft.md` (motivation, rejected options,
+safety model, and owner decisions). Implementation record: `done.md`.
+
 
 Desired UX: `just db` keeps the local `data/` SQLite files in sync with the
 VM's `/opt/quantitative-trading/data/` — "like gcsfuse, so changes from the VM

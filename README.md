@@ -234,7 +234,7 @@ Two-way sync of `data/metadata.db` and `data/feed.db` with the VM — the
 closest safe equivalent to a gcsfuse-style mount (SQLite is never mounted or
 opened over the network; files are copied whole over IAP SSH with sha256
 verification, timestamped backups, and a last-synced fingerprint in
-`data/.db-sync-state.json`). See `specs/008--db-sync/draft.md`.
+`data/.db-sync-state.json`). See `specs/008--db-sync/plan.md`.
 
 ```bash
 just db             # usage + status (local vs remote sha/mtime verdicts)
@@ -253,5 +253,6 @@ pick a winner with `just db pull <db> --overwrite` or `just db push <db>
 Design decisions and phase-by-phase instructions live in `specs/`:
 `001--initial-implementation` (app), `002--deployment` (infrastructure),
 `003--readme` (this README), `004--ui-improvement` (monitor UI), and
-`005--gcp-logging` (Cloud Logging integration) — each with a `draft.md`
-(requirements) and, where implemented, a `plan.md` (implementation record).
+`005--gcp-logging` (Cloud Logging integration) — each with a `plan.md`
+(implementation record; `001`–`004` also keep the owner's original
+`draft.md`/`instruction.md`).

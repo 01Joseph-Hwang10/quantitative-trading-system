@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Two-way sync of the local SQLite databases (data/metadata.db, data/feed.db)
-# with the VM's /opt/quantitative-trading/data. See specs/008--db-sync/draft.md.
+# with the VM's /opt/quantitative-trading/data. See specs/008--db-sync/plan.md.
 #
 # Usage:
 #   db_sync.sh [status|pull|push|sync|watch] [metadata|feed|all] [--force] [--overwrite]
