@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from system.apps.monitor.support import compute_performance, is_authorized
+from system.apps.monitor.support import compute_performance, decisions_frame, is_authorized
 from system.apps.trader.trader import Trader
 from system.config.settings import Settings
 from system.libs.db import metadata
@@ -131,6 +131,27 @@ def test_compute_performance_ongoing_drawdown(metadata_conn):
     performance = compute_performance(metadata_conn)
     assert performance["max_drawdown_duration_days"] == 1  # Mar 2 peak → Mar 3
     assert performance["max_drawdown_ongoing"]
+
+
+def test_decisions_frame_maps_rows_newest_first(metadata_conn):
+    metadata.record_decision(
+        metadata_conn, ts="2026-10-06T15:00:00+09:00", symbol="0072R0", signal="HOLD", reason="strategy", indicators={"adx": 26.6, "close": 11890.0}
+    )
+    metadata.record_decision(
+        metadata_conn, ts="2026-10-07T15:00:00+09:00", symbol="0072R0", signal="BUY", reason="strategy", indicators={"close": 11900.0}, executed=True
+    )
+
+    frame = decisions_frame([dict(row) for row in metadata.list_decisions(metadata_conn)])
+
+    assert list(frame.columns) == ["ts", "symbol", "signal", "reason", "executed", "indicators"]
+    assert frame["signal"].tolist() == ["BUY", "HOLD"]  # newest first
+    assert frame["executed"].tolist() == [True, False]  # bool, not 0/1
+    assert frame.iloc[0]["indicators"] == '{"close":11900.0}'  # compacted
+    assert "adx" in frame.iloc[1]["indicators"]
+
+
+def test_decisions_frame_empty(metadata_conn):
+    assert decisions_frame([]).empty
 
 
 def pytest_approx(value):

@@ -200,3 +200,27 @@ def positions_from_snapshot(row: sqlite3.Row | None) -> list[dict]:
     if row is None:
         return []
     return json.loads(row["positions_json"])
+
+
+def compact_json(raw: str) -> str:
+    try:
+        return json.dumps(json.loads(raw), separators=(",", ":"))
+    except (TypeError, ValueError):
+        return raw
+
+
+def decisions_frame(decisions: list[dict]) -> pd.DataFrame:
+    """Decisions rows as a display frame: executed → bool, JSON → compact string."""
+    return pd.DataFrame(
+        [
+            {
+                "ts": row["ts"],
+                "symbol": row["symbol"],
+                "signal": row["signal"],
+                "reason": row["reason"],
+                "executed": bool(row["executed"]),
+                "indicators": compact_json(row["indicators_json"]),
+            }
+            for row in decisions
+        ]
+    )

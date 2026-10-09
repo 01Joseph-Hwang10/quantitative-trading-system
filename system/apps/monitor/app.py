@@ -7,7 +7,6 @@ Pages are navigated vertically via the sidebar (st.navigation).
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta
@@ -290,7 +289,7 @@ def render_data_feeds(feed_conn: sqlite3.Connection) -> None:
         st.write("No data feeds stored yet.")
         return
     feed_frame = pd.DataFrame([dict(row) for row in feeds])
-    feed_frame["source_params_json"] = feed_frame["source_params_json"].apply(_compact_json)
+    feed_frame["source_params_json"] = feed_frame["source_params_json"].apply(support.compact_json)
     st.dataframe(feed_frame, use_container_width=True)
 
     st.subheader("Delete a feed (drop table)")
@@ -450,24 +449,35 @@ def _ohlcv_figure(frame: pd.DataFrame, name: str) -> go.Figure:
 def render_trades(metadata_conn: sqlite3.Connection) -> None:
     st.header("Trades")
     trades = metadata.list_trades(metadata_conn)
-    if not trades:
-        st.write("No trades recorded yet.")
-        return
-    st.dataframe(pd.DataFrame([dict(row) for row in trades]), use_container_width=True)
     decisions = [dict(row) for row in metadata.list_decisions(metadata_conn)]
-    for row in trades:
-        with st.expander(
-            f"{row['ts']} · {row['side']} {row['quantity']} {row['symbol']} " f"@ {row['price']:,.0f} ({row['status']})"
-        ):
-            st.json(
-                {
-                    "id": row["id"],
-                    "order_id": row["order_id"],
-                    "strategy": row["strategy"],
-                    "note": row["note"],
-                    "nearest_decision": _nearest_decision(decisions, row["ts"]),
-                }
-            )
+
+    tab_trades, tab_decisions = st.tabs(["Trades", "Decisions"])
+
+    with tab_trades:
+        if not trades:
+            st.write("No trades recorded yet.")
+        else:
+            st.dataframe(pd.DataFrame([dict(row) for row in trades]), use_container_width=True)
+            for row in trades:
+                with st.expander(
+                    f"{row['ts']} · {row['side']} {row['quantity']} {row['symbol']} " f"@ {row['price']:,.0f} ({row['status']})"
+                ):
+                    st.json(
+                        {
+                            "id": row["id"],
+                            "order_id": row["order_id"],
+                            "strategy": row["strategy"],
+                            "note": row["note"],
+                            "nearest_decision": _nearest_decision(decisions, row["ts"]),
+                        }
+                    )
+
+    with tab_decisions:
+        decisions_frame = support.decisions_frame(decisions)
+        if decisions_frame.empty:
+            st.write("No decisions recorded yet.")
+        else:
+            st.dataframe(decisions_frame, use_container_width=True)
 
 
 def _nearest_decision(decisions: list[dict], ts: str) -> dict | None:
@@ -494,13 +504,6 @@ def render_settings(settings: Settings, metadata_conn: sqlite3.Connection) -> No
         f"Decision schedule: `{settings.decision_schedule_cron}` · "
         f"Feed update schedule: `{settings.feed_update_schedule_cron}` ({settings.timezone})"
     )
-
-
-def _compact_json(raw: str) -> str:
-    try:
-        return json.dumps(json.loads(raw), separators=(",", ":"))
-    except (TypeError, ValueError):
-        return raw
 
 
 main()
