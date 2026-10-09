@@ -28,8 +28,9 @@ services:
     volumes:
       - ./data:/app/data
     ports:
-      # Loopback only — the monitor is reached via SSH port-forwarding.
-      - "127.0.0.1:8501:8501"
+      # Published on all interfaces: reached via the Cloud Run proxy (spec 010)
+      # AND via SSH port-forwarding (loopback path unchanged).
+      - "8501:8501"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stalive/health')"]

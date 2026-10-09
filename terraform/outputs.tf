@@ -12,3 +12,8 @@ output "vm_zone" {
   description = "Zone of the VM (for gcloud IAP tunnel commands)."
   value       = var.zone
 }
+
+output "monitor_proxy_url" {
+  description = "HTTPS URL of the Cloud Run monitor proxy (OAuth redirect domain)."
+  value       = google_cloud_run_v2_service.monitor_proxy.uri
+}

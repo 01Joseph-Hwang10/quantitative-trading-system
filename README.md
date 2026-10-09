@@ -145,6 +145,28 @@ just logs trader      # tail logs (or: just logs monitor)
 just tunnel           # port-forward the monitor to localhost:8501
 ```
 
+#### Accessing the monitor (HTTPS)
+
+The monitor is also served through a Cloud Run nginx reverse proxy
+(`terraform/main.tf` → `google_cloud_run_v2_service.monitor_proxy`), which
+gives Google OAuth a valid HTTPS redirect domain:
+
+- **URL:** `terraform output monitor_proxy_url` (e.g.
+  `https://quantitative-trading-monitor-<hash>-uc.a.run.app`) — log in with an
+  `AUTHORIZED_USERS` email.
+- Uses the stock nginx image with an in-line config (no Dockerfile, no extra
+  infra); it proxies to the VM's static IP on port 8501 (firewall rule
+  `quantitative-trading-monitor-8501`).
+- It is fire-and-forget: `just update` touches only the VM; an IP change
+  propagates on the next `terraform apply`.
+- End-to-end health check: `curl https://<proxy-url>/_stcore/health` → `ok`.
+  (`/healthz` is intercepted by Google's run.app frontend.)
+- One-time console config (done 2026-10): OAuth client redirect URI
+  `https://<proxy-url>/oauth2callback`, consent-screen authorized domain
+  `https://<proxy-url>`, branding homepage + privacy policy
+  (`/privacy`, served by the proxy), consent screen **published to
+  production**. Console changes propagate in 5 min – a few hours.
+
 - `just update` **rejects during KRX market hours** (weekdays 09:00–15:30 KST);
   `--force` overrides. Failed updates keep the old version running and print
   the error plus a rollback hint — rollback is always manual.
@@ -196,10 +218,14 @@ create the key and ask nothing interactively.
 2. **Trader enable/disable** is a runtime switch (monitor → Settings tab, or
    `app_state.trader_enabled` in `metadata.db`). The daemon checks it every
    cycle; disabling skips decisions without stopping the daemon.
-3. **Monitor access** is SSH-port-forward only (`just tunnel`), so the Google
-   OAuth redirect URI must remain `http://localhost:8501/oauth2callback`.
-   Google rejects bare-IP redirect URIs — do not "simplify" this to the VM's
-   static IP. Only emails in `AUTHORIZED_USERS` get past the login gate.
+3. **Monitor access** has two paths: the Cloud Run HTTPS proxy (primary; see
+   *Deployment → Accessing the monitor*) and SSH-port-forwarding
+   (`just tunnel`). The OAuth redirect URI is
+   `https://quantitative-trading-monitor-<hash>-uc.a.run.app/oauth2callback`
+   in `.env.production`; `http://localhost:8501/oauth2callback` remains
+   registered on the OAuth client for tunnel use. Never "simplify" either to
+   the VM's bare IP — Google rejects raw-IP redirect URIs. Only emails in
+   `AUTHORIZED_USERS` get past the login gate.
 4. **Same-day data**: yfinance publishes daily bars only after the session
    closes. At decision time the trader appends a provisional same-day bar from
    the broker's price API (mock mode: replays the last stored bar). It is
