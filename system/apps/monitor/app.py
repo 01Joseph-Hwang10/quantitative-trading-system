@@ -2,7 +2,8 @@
 
 Read-only on feed.db except `drop_feed` (table + `_metadata` row), per spec —
 the monitor never updates feed data (that is the trader daemon's job).
-Pages are navigated vertically via the sidebar (st.navigation).
+Pages are navigated vertically via the sidebar (st.navigation); the Data
+Feeds page hosts the former Feed Detail page as a horizontal tab.
 """
 
 from __future__ import annotations
@@ -96,7 +97,6 @@ def main() -> None:
             url_path="performance",
         ),
         st.Page(partial(render_data_feeds, connections.feed), title="Data Feeds", icon="🗂️", url_path="data-feeds"),
-        st.Page(partial(render_feed_detail, connections.feed), title="Feed Detail", icon="🔎", url_path="feed-detail"),
         st.Page(partial(render_trades, connections.metadata), title="Trades", icon="🧾", url_path="trades"),
         st.Page(
             partial(render_settings, settings, connections.metadata),
@@ -284,68 +284,70 @@ def render_data_feeds(feed_conn: sqlite3.Connection) -> None:
         "Feeds are updated by the trader daemon. The monitor can only read "
         "feeds or delete (drop) an entire feed table."
     )
-    feeds = feed_store.list_feeds(feed_conn)
-    if not feeds:
-        st.write("No data feeds stored yet.")
-        return
-    feed_frame = pd.DataFrame([dict(row) for row in feeds])
-    feed_frame["source_params_json"] = feed_frame["source_params_json"].apply(support.compact_json)
-    st.dataframe(feed_frame, use_container_width=True)
 
-    st.subheader("Delete a feed (drop table)")
-    with st.form("drop_feed_form"):
-        name = st.selectbox("Feed", [row["name"] for row in feeds])
-        confirmed = st.checkbox("I understand this permanently drops the feed table")
-        submitted_delete = st.form_submit_button("Delete feed")
-    if submitted_delete:
-        if confirmed:
+    tab_list, tab_detail = st.tabs(["Feeds", "Feed Detail"])
+
+    with tab_list:
+        feeds = feed_store.list_feeds(feed_conn)
+        if not feeds:
+            st.write("No data feeds stored yet.")
+        else:
+            feed_frame = pd.DataFrame([dict(row) for row in feeds])
+            feed_frame["source_params_json"] = feed_frame["source_params_json"].apply(support.compact_json)
+            st.dataframe(feed_frame, use_container_width=True)
+
+            st.subheader("Delete a feed (drop table)")
+            with st.form("drop_feed_form"):
+                name = st.selectbox("Feed", [row["name"] for row in feeds])
+                confirmed = st.checkbox("I understand this permanently drops the feed table")
+                submitted_delete = st.form_submit_button("Delete feed")
+            if submitted_delete:
+                if confirmed:
+                    feed_store.drop_feed(feed_conn, name)
+                    st.success(f"Dropped feed {name!r}")
+                    st.rerun()
+                else:
+                    st.warning("Tick the confirmation checkbox to delete.")
+
+    with tab_detail:
+        stored = [row["name"] for row in feed_store.list_feeds(feed_conn)]
+        candidates = sorted(set(stored) | set(feed_names()))
+        if not candidates:
+            st.write("No feeds available.")
+            return
+        name = st.selectbox("Feed", candidates)
+        meta = feed_store.get_feed_meta(feed_conn, name)
+        if meta is None:
+            st.warning(f"{name!r} has never been fetched (no rows stored).")
+            return
+        st.write(f"Source: `{meta['source']}` · Rows: {meta['row_count']} · " f"Last updated: {meta['last_updated_at']}")
+
+        rows = feed_store.read_table(feed_conn, name)
+        frame = pd.DataFrame([dict(row) for row in rows])
+        frame["date"] = pd.to_datetime(frame["date"])
+
+        st.subheader("Chart")
+        lookback_days = st.selectbox(
+            "Chart window",
+            [30, 90, 180, 365, None],
+            index=1,
+            format_func=lambda days: "All" if days is None else f"{days} days",
+        )
+        if lookback_days is not None:
+            frame = frame[frame["date"] >= pd.Timestamp.now() - pd.Timedelta(days=lookback_days)]
+        if frame.empty:
+            st.write("No rows in the selected window.")
+        elif "close" in frame.columns:
+            st.plotly_chart(_ohlcv_figure(frame, name), use_container_width=True)
+        else:
+            st.plotly_chart(_scalar_figure(frame, name), use_container_width=True)
+
+        st.caption("Preview (latest 200 rows)")
+        st.dataframe(pd.DataFrame([dict(row) for row in rows[-200:]]), use_container_width=True)
+        if st.button("Delete this feed (drop table)"):
             feed_store.drop_feed(feed_conn, name)
             st.success(f"Dropped feed {name!r}")
             st.rerun()
-        else:
-            st.warning("Tick the confirmation checkbox to delete.")
-
-
-def render_feed_detail(feed_conn: sqlite3.Connection) -> None:
-    st.header("Feed Detail")
-    stored = [row["name"] for row in feed_store.list_feeds(feed_conn)]
-    candidates = sorted(set(stored) | set(feed_names()))
-    if not candidates:
-        st.write("No feeds available.")
-        return
-    name = st.selectbox("Feed", candidates)
-    meta = feed_store.get_feed_meta(feed_conn, name)
-    if meta is None:
-        st.warning(f"{name!r} has never been fetched (no rows stored).")
-        return
-    st.write(f"Source: `{meta['source']}` · Rows: {meta['row_count']} · " f"Last updated: {meta['last_updated_at']}")
-
-    rows = feed_store.read_table(feed_conn, name)
-    frame = pd.DataFrame([dict(row) for row in rows])
-    frame["date"] = pd.to_datetime(frame["date"])
-
-    st.subheader("Chart")
-    lookback_days = st.selectbox(
-        "Chart window",
-        [30, 90, 180, 365, None],
-        index=1,
-        format_func=lambda days: "All" if days is None else f"{days} days",
-    )
-    if lookback_days is not None:
-        frame = frame[frame["date"] >= pd.Timestamp.now() - pd.Timedelta(days=lookback_days)]
-    if frame.empty:
-        st.write("No rows in the selected window.")
-    elif "close" in frame.columns:
-        st.plotly_chart(_ohlcv_figure(frame, name), use_container_width=True)
-    else:
-        st.plotly_chart(_scalar_figure(frame, name), use_container_width=True)
-
-    st.caption("Preview (latest 200 rows)")
-    st.dataframe(pd.DataFrame([dict(row) for row in rows[-200:]]), use_container_width=True)
-    if st.button("Delete this feed (drop table)"):
-        feed_store.drop_feed(feed_conn, name)
-        st.success(f"Dropped feed {name!r}")
-        st.rerun()
 
 
 def _padded_range(values: pd.Series, padding: float = 0.05) -> list[float]:
