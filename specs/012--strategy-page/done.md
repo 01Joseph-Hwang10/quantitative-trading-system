@@ -1,7 +1,7 @@
 # Done — Strategy page (markdown white paper)
 
-Implementation record for `plan.md` (owner request, 2026). Shipped with the
-spec itself; commit hash recorded at commit time.
+Implementation record for `plan.md` (owner request, 2026). Shipped in
+`df7ee74`.
 
 ## Surface
 
