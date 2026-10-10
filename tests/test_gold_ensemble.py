@@ -5,8 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from system.libs.signals.macro import compute_macro_frame
 from system.libs.strategy.base import MarketView, Signal
-from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy, compute_macro_frame
+from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy
 
 
 def test_compute_macro_frame_parity():
@@ -38,11 +39,11 @@ def test_compute_macro_frame_parity():
         assert actual.abs().max() <= 1.0
 
 
-def _view(ohlcv, macro, quantity=0, entry_price=None) -> MarketView:
+def _view(ohlcv, signals, quantity=0, entry_price=None) -> MarketView:
     return MarketView(
         symbol="0072R0",
         ohlcv=ohlcv,
-        macro=macro,
+        signals=signals,
         position_quantity=quantity,
         position_entry_price=entry_price,
     )
@@ -60,6 +61,7 @@ def _trending_up_ohlcv(days: int = 120, base_price: float = 10_000.0) -> pd.Data
 
 def _flat_macro(ohlcv: pd.DataFrame) -> pd.DataFrame:
     """Constant macro series → D_t = 0 everywhere (no macro gate)."""
+    # Constant inputs → zero returns → tanh(0) = 0 component scores.
     return compute_macro_frame(
         pd.Series(4.0, index=ohlcv.index),
         pd.Series(104.0, index=ohlcv.index),

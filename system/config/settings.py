@@ -18,9 +18,7 @@ DEFAULT_FEED_START_DATE = "2022-10-01"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=os.environ.get("ENV_FILE", ".env"), extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=os.environ.get("ENV_FILE", ".env"), extra="ignore")
 
     # Broker settings — field names match the env var names (case-insensitive).
     broker: str = "mock"  # "mock" | "toss"
@@ -57,6 +55,10 @@ class Settings(BaseSettings):
     @property
     def feed_db_path(self) -> Path:
         return self.data_dir / "feed.db"
+
+    @property
+    def signals_db_path(self) -> Path:
+        return self.data_dir / "signals.db"
 
     def ensure_data_dir(self) -> Path:
         self.data_dir.mkdir(parents=True, exist_ok=True)

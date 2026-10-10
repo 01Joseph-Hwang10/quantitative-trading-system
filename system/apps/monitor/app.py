@@ -1,9 +1,10 @@
-"""Monitor app: performance dashboard over metadata.db and feed.db.
+"""Monitor app: performance dashboard over metadata.db, feed.db, and signals.db.
 
-Read-only on feed.db except `drop_feed` (table + `_metadata` row), per spec —
-the monitor never updates feed data (that is the trader daemon's job).
-Pages are navigated vertically via the sidebar (st.navigation); the Data
-Feeds page hosts the former Feed Detail page as a horizontal tab.
+Read-only on feed.db/signals.db except `drop_feed`/`drop_signal` (table +
+`_metadata` row), per spec — the monitor never updates feed or signal data
+(that is the trader daemon's job). Pages are navigated vertically via the
+sidebar (st.navigation); the Data Feeds and Signals pages host the former
+Feed/Signal Detail pages as horizontal tabs.
 """
 
 from __future__ import annotations
@@ -22,8 +23,9 @@ from plotly.subplots import make_subplots
 from system.apps.monitor import support
 from system.config.gateways import Connections
 from system.config.settings import Settings
-from system.libs.db import feed_store, metadata
+from system.libs.db import feed_store, metadata, signals_store
 from system.libs.feeds.registry import feed_names
+from system.libs.signals.registry import signal_names
 from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ def _monitor_connections(settings: Settings) -> Connections:
     connections = Connections(
         metadata=metadata.connect(settings.metadata_db_path),
         feed=feed_store.connect(settings.feed_db_path),
+        signals=signals_store.connect(settings.signals_db_path),
     )
     metadata.seed_state(connections.metadata, {"trader_enabled": str(settings.trader_enabled).lower()})
     return connections
@@ -81,7 +84,7 @@ def main() -> None:
     st.sidebar.write(f"👤 {email}")
     st.sidebar.button("Log out", on_click=st.logout)
     st.sidebar.toggle("Auto-refresh (60s)", key="auto_refresh")
-    _render_freshness(connections.metadata, connections.feed)
+    _render_freshness(connections.metadata, connections.feed, connections.signals)
 
     pages = [
         st.Page(
@@ -98,6 +101,12 @@ def main() -> None:
             url_path="performance",
         ),
         st.Page(partial(render_data_feeds, connections.feed), title="Data Feeds", icon="🗂️", url_path="data-feeds"),
+        st.Page(
+            partial(render_signals, connections.signals),
+            title="Signals",
+            icon=":material/insights:",
+            url_path="signals",
+        ),
         st.Page(partial(render_trades, connections.metadata), title="Trades", icon="🧾", url_path="trades"),
         st.Page(render_strategy, title="Strategy", icon=":material/description:", url_path="strategy"),
         st.Page(
@@ -111,13 +120,19 @@ def main() -> None:
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
-def _render_freshness(metadata_conn: sqlite3.Connection, feed_conn: sqlite3.Connection) -> None:
-    """Freshness badge: latest snapshot and feed update, to spot a stalled daemon."""
+def _render_freshness(
+    metadata_conn: sqlite3.Connection, feed_conn: sqlite3.Connection, signals_conn: sqlite3.Connection
+) -> None:
+    """Freshness badge: latest snapshot and feed/signal update, to spot a stalled daemon."""
     st.sidebar.subheader("Freshness")
     snapshot = metadata.latest_snapshot(metadata_conn)
     st.sidebar.caption(f"Last snapshot: {snapshot['ts'] if snapshot else 'never'}")
     updates = [row["last_updated_at"] for row in feed_store.list_feeds(feed_conn) if row["last_updated_at"]]
     st.sidebar.caption(f"Last feed update: {max(updates) if updates else 'never'}")
+    signal_updates = [
+        row["last_updated_at"] for row in signals_store.list_signals(signals_conn) if row["last_updated_at"]
+    ]
+    st.sidebar.caption(f"Last signal update: {max(signal_updates) if signal_updates else 'never'}")
 
 
 # ── Overview ────────────────────────────────────────────────────────────────
@@ -322,7 +337,9 @@ def render_data_feeds(feed_conn: sqlite3.Connection) -> None:
         if meta is None:
             st.warning(f"{name!r} has never been fetched (no rows stored).")
             return
-        st.write(f"Source: `{meta['source']}` · Rows: {meta['row_count']} · " f"Last updated: {meta['last_updated_at']}")
+        st.write(
+            f"Source: `{meta['source']}` · Rows: {meta['row_count']} · " f"Last updated: {meta['last_updated_at']}"
+        )
 
         rows = feed_store.read_table(feed_conn, name)
         frame = pd.DataFrame([dict(row) for row in rows])
@@ -349,6 +366,78 @@ def render_data_feeds(feed_conn: sqlite3.Connection) -> None:
         if st.button("Delete this feed (drop table)"):
             feed_store.drop_feed(feed_conn, name)
             st.success(f"Dropped feed {name!r}")
+            st.rerun()
+
+
+# ── Signals (read + drop only) ──────────────────────────────────────────
+def render_signals(signals_conn: sqlite3.Connection) -> None:
+    st.header("Signals")
+    st.caption(
+        "Signals are derived daily series computed by the trader daemon from "
+        "the stored data feeds. The monitor can only read signals or delete "
+        "(drop) an entire signal table."
+    )
+
+    tab_list, tab_detail = st.tabs(["Signals", "Signal Detail"])
+
+    with tab_list:
+        signals = signals_store.list_signals(signals_conn)
+        if not signals:
+            st.write("No signals stored yet.")
+        else:
+            signal_frame = pd.DataFrame([dict(row) for row in signals])
+            signal_frame["source_params_json"] = signal_frame["source_params_json"].apply(support.compact_json)
+            st.dataframe(signal_frame, use_container_width=True)
+
+            st.subheader("Delete a signal (drop table)")
+            with st.form("drop_signal_form"):
+                name = st.selectbox("Signal", [row["name"] for row in signals])
+                confirmed = st.checkbox("I understand this permanently drops the signal table")
+                submitted_delete = st.form_submit_button("Delete signal")
+            if submitted_delete:
+                if confirmed:
+                    signals_store.drop_signal(signals_conn, name)
+                    st.success(f"Dropped signal {name!r}")
+                    st.rerun()
+                else:
+                    st.warning("Tick the confirmation checkbox to delete.")
+
+    with tab_detail:
+        stored = [row["name"] for row in signals_store.list_signals(signals_conn)]
+        candidates = sorted(set(stored) | set(signal_names()))
+        if not candidates:
+            st.write("No signals available.")
+            return
+        name = st.selectbox("Signal", candidates)
+        meta = signals_store.get_signal_meta(signals_conn, name)
+        if meta is None:
+            st.warning(f"{name!r} has never been computed (no rows stored).")
+            return
+        st.write(f"Source: `{meta['source']}` · Rows: {meta['row_count']} · Last updated: {meta['last_updated_at']}")
+
+        rows = signals_store.read_table(signals_conn, name)
+        frame = pd.DataFrame([dict(row) for row in rows])
+        frame["date"] = pd.to_datetime(frame["date"])
+
+        st.subheader("Chart")
+        lookback_days = st.selectbox(
+            "Chart window",
+            [30, 90, 180, 365, None],
+            index=1,
+            format_func=lambda days: "All" if days is None else f"{days} days",
+        )
+        if lookback_days is not None:
+            frame = frame[frame["date"] >= pd.Timestamp.now() - pd.Timedelta(days=lookback_days)]
+        if frame.empty:
+            st.write("No rows in the selected window.")
+        else:
+            st.plotly_chart(_scalar_figure(frame, name), use_container_width=True)
+
+        st.caption("Preview (latest 200 rows)")
+        st.dataframe(pd.DataFrame([dict(row) for row in rows[-200:]]), use_container_width=True)
+        if st.button("Delete this signal (drop table)"):
+            signals_store.drop_signal(signals_conn, name)
+            st.success(f"Dropped signal {name!r}")
             st.rerun()
 
 
@@ -473,7 +562,8 @@ def render_trades(metadata_conn: sqlite3.Connection) -> None:
             st.dataframe(pd.DataFrame([dict(row) for row in trades]), use_container_width=True)
             for row in trades:
                 with st.expander(
-                    f"{row['ts']} · {row['side']} {row['quantity']} {row['symbol']} " f"@ {row['price']:,.0f} ({row['status']})"
+                    f"{row['ts']} · {row['side']} {row['quantity']} {row['symbol']} "
+                    f"@ {row['price']:,.0f} ({row['status']})"
                 ):
                     st.json(
                         {

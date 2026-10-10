@@ -10,7 +10,7 @@ An algorithmic trading system for the KRX market, currently running the
   client (`mock` for testing, `tossinvest` for live execution).
 - **monitor** — a Streamlit dashboard (Google OIDC login + email allowlist)
   over the same local databases: performance overview, data-feed browsing,
-  trade log, and a trader enable/disable switch.
+  signal browsing, trade log, and a trader enable/disable switch.
 
 ## Repository Layout
 
@@ -26,8 +26,9 @@ system/
 │   │   └── monitor/             # Streamlit UI (auth, tabs)
 │   ├── libs/
 │   │   ├── feeds/               # DataFeed (pd.DataFrame subclass) + registry
+│   │   ├── signals/             # Signals (pd.DataFrame subclass) + registry
 │   │   ├── strategy/            # Strategy protocol + GoldEnsembleStrategy
-│   │   └── db/                  # metadata.db and feed.db layers (sqlite)
+│   │   └── db/                  # metadata.db, feed.db, signals.db layers (sqlite)
 │   └── config/                  # Settings (.env) + logging setup + gateway factories
 ├── terraform/                   # GCP: API enablement, VM, Artifact Registry, firewall, IAM
 ├── ansible/                     # VM bootstrap + deploy/update/rollback
@@ -86,6 +87,7 @@ broker.
 | **Trade a new strategy (the normal workflow)** | Create `system/libs/strategy/<your_strategy>.py` implementing `decide(view) -> (Signal, dict)` from `system/libs/strategy/base.py`, then select it in `system/apps/trader/trader.py` |
 | Change strategy logic, thresholds, or parameters | Prefer a **new** strategy module over editing `gold_ensemble.py` (see "Strategy notes" below) |
 | Add/change data feeds (symbols, sources) | Register in `system/libs/feeds/registry.py`; feed classes live in `system/libs/feeds/` (`OhlcvFeed`, `ScalarFeed`, or a new `DataFeed` subclass) |
+| Add/change derived signals (`D_t`, `ADX`, `T_t`, …) | Register in `system/libs/signals/registry.py` (`SIGNAL_DEFINITIONS`); compute functions live in `system/libs/signals/` (`macro.py`, `technical.py`) |
 | Change position sizing / execution rules | `Trader.execute()` in `system/apps/trader/trader.py` |
 | Add a broker backend | Implement `BrokerClient` from `system/apps/trader/broker/base.py`; select via `BROKER` env |
 | Change trading schedule | `.env`: `DECISION_SCHEDULE_CRON`, `FEED_UPDATE_SCHEDULE_CRON` (cron, evaluated in `Asia/Seoul`) |
@@ -240,8 +242,10 @@ create the key and ask nothing interactively.
    `.streamlit/secrets.toml` are all gitignored. The VM's `.env` is root-only
    (mode 0600).
 8. **Databases** live in `data/` on the VM (bind-mounted into both containers):
-   `metadata.db` (trades, decisions, account snapshots, app state) and
-   `feed.db` (market data). Back them up before destructive experiments.
+   `metadata.db` (trades, decisions, account snapshots, app state),
+   `feed.db` (market data), and `signals.db` (derived daily signals — `D_t`,
+   component scores, `ADX`, `T_t` — computed by the trader from the stored
+   feeds). Back them up before destructive experiments.
 9. **Scale**: everything is sized for the e2-micro (1 GB RAM + 2 GB swap).
    Adding heavier strategies or more feeds — resize the VM first
    (`vm_machine_type` in `terraform/terraform.tfvars`).

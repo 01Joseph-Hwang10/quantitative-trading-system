@@ -29,7 +29,7 @@ class MarketView:
 
     symbol: str
     ohlcv: pd.DataFrame  # trading-stock feed, including today's snapshot row
-    macro: pd.DataFrame  # unified macro frame with delayed series + D_t_{n} columns
+    signals: pd.DataFrame  # wide macro Signals frame with delayed series + D_t_{n} columns
     position_quantity: int = 0  # current held units (0 = flat)
     position_entry_price: float | None = None  # average entry price; None if flat
     extra: dict[str, Any] = field(default_factory=dict)

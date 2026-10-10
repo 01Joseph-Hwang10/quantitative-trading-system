@@ -19,8 +19,11 @@ from system.libs.feeds.registry import (
     TRADING_STOCK_SYMBOL,
     load_feed,
 )
+from system.libs.signals.base import Signals
+from system.libs.signals.macro import compute_macro_frame
+from system.libs.signals.registry import build_signal, signal_names
 from system.libs.strategy.base import MarketView, Signal
-from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy, compute_macro_frame
+from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +40,13 @@ class Trader:
         *,
         broker: BrokerClient,
         feed_conn: sqlite3.Connection,
+        signals_conn: sqlite3.Connection,
         metadata_conn: sqlite3.Connection,
         timezone_name: str = "Asia/Seoul",
     ) -> None:
         self.broker = broker
         self.feed_conn = feed_conn
+        self.signals_conn = signals_conn
         self.metadata_conn = metadata_conn
         self.timezone = ZoneInfo(timezone_name)
         self.strategy = GoldEnsembleStrategy()
@@ -61,10 +66,12 @@ class Trader:
             logger.info("Cycle skipped: market closed")
             return Signal.HOLD
 
-        # 1. Update data feeds (idempotent) and hydrate them.
+        # 1. Update data feeds (idempotent) and hydrate them, then refresh
+        # the derived signals (also idempotent, pure local computation).
         self.update_feeds()
+        self.update_signals()
         trading_feed = load_feed(self.feed_conn, TRADING_STOCK_FEED)
-        macro_frame = self.build_macro_frame()
+        macro_signals = self.build_macro_signals()
 
         # 2. Account state (position quantity + entry price come from the broker).
         account = self.broker.get_account()
@@ -77,7 +84,7 @@ class Trader:
         view = MarketView(
             symbol=TRADING_STOCK_SYMBOL,
             ohlcv=view_frame,
-            macro=macro_frame,
+            signals=macro_signals,
             position_quantity=position.quantity if position else 0,
             position_entry_price=position.avg_price if position else None,
         )
@@ -100,7 +107,24 @@ class Trader:
             updated[name] = feed.update(self.feed_conn)
         return updated
 
-    def build_macro_frame(self) -> pd.DataFrame:
+    def update_signals(self, names: list[str] | None = None) -> dict[str, int]:
+        """Recompute and persist the registered signals (idempotent).
+
+        signals.db is observability: the decision path recomputes its values
+        on the fly, so one failing signal must never abort the cycle or its
+        sibling signals (mirrors the per-feed fetch guard).
+        """
+        updated: dict[str, int] = {}
+        for name in names or signal_names():
+            try:
+                updated[name] = build_signal(name).update(self.signals_conn, self.feed_conn)
+            except Exception:  # noqa: BLE001 - one bad signal must not abort the cycle
+                logger.warning("Signal %s: update failed", name, exc_info=True)
+                updated[name] = 0
+        return updated
+
+    def build_macro_signals(self) -> Signals:
+        """Wide macro Signals frame (delayed series + D_t_{n} columns)."""
         macro_series = []
         for name in MACRO_FEEDS:
             feed = load_feed(self.feed_conn, name)

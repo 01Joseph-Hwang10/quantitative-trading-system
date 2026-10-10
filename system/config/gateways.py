@@ -12,7 +12,7 @@ from system.apps.trader.broker.base import BrokerClient
 from system.apps.trader.broker.mock import MockBroker
 from system.apps.trader.broker.tossinvest import TossBroker
 from system.config.settings import Settings
-from system.libs.db import feed_store, metadata
+from system.libs.db import feed_store, metadata, signals_store
 from system.libs.feeds import registry
 
 
@@ -20,19 +20,22 @@ from system.libs.feeds import registry
 class Connections:
     metadata: sqlite3.Connection
     feed: sqlite3.Connection
+    signals: sqlite3.Connection
 
     def close(self) -> None:
         self.metadata.close()
         self.feed.close()
+        self.signals.close()
 
 
 @contextmanager
 def open_connections(settings: Settings):
-    """Open metadata.db and feed.db (creating schemas as needed)."""
+    """Open metadata.db, feed.db, and signals.db (creating schemas as needed)."""
     settings.ensure_data_dir()
     connections = Connections(
         metadata=metadata.connect(settings.metadata_db_path),
         feed=feed_store.connect(settings.feed_db_path),
+        signals=signals_store.connect(settings.signals_db_path),
     )
     try:
         metadata.seed_state(connections.metadata, {"trader_enabled": str(settings.trader_enabled).lower()})

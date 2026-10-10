@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from system.apps.monitor.support import compute_performance, decisions_frame, is_authorized
+from system.apps.monitor.support import (
+    compute_performance,
+    decisions_frame,
+    is_authorized,
+)
 from system.apps.trader.trader import Trader
 from system.config.settings import Settings
 from system.libs.db import metadata
@@ -19,9 +23,9 @@ def test_is_authorized_parses_allowlist(tmp_path):
     assert not is_authorized(None, settings)
 
 
-def test_compute_performance_on_seeded_history(metadata_conn, feed_conn, tmp_path):
+def test_compute_performance_on_seeded_history(metadata_conn, feed_conn, signals_conn, tmp_path):
     broker = FixedPriceMockBroker(tmp_path / "positions.json", price=10_000.0)
-    trader = Trader(broker=broker, feed_conn=feed_conn, metadata_conn=metadata_conn)
+    trader = Trader(broker=broker, feed_conn=feed_conn, signals_conn=signals_conn, metadata_conn=metadata_conn)
     seed_feed_world(feed_conn)
 
     trader.strategy = StubStrategy(Signal.BUY)
@@ -135,10 +139,21 @@ def test_compute_performance_ongoing_drawdown(metadata_conn):
 
 def test_decisions_frame_maps_rows_newest_first(metadata_conn):
     metadata.record_decision(
-        metadata_conn, ts="2026-10-06T15:00:00+09:00", symbol="0072R0", signal="HOLD", reason="strategy", indicators={"adx": 26.6, "close": 11890.0}
+        metadata_conn,
+        ts="2026-10-06T15:00:00+09:00",
+        symbol="0072R0",
+        signal="HOLD",
+        reason="strategy",
+        indicators={"adx": 26.6, "close": 11890.0},
     )
     metadata.record_decision(
-        metadata_conn, ts="2026-10-07T15:00:00+09:00", symbol="0072R0", signal="BUY", reason="strategy", indicators={"close": 11900.0}, executed=True
+        metadata_conn,
+        ts="2026-10-07T15:00:00+09:00",
+        symbol="0072R0",
+        signal="BUY",
+        reason="strategy",
+        indicators={"close": 11900.0},
+        executed=True,
     )
 
     frame = decisions_frame([dict(row) for row in metadata.list_decisions(metadata_conn)])

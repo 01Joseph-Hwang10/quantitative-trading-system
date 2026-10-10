@@ -13,7 +13,7 @@ from system.apps.trader.broker.base import AccountState, OrderResult, Position
 from system.apps.trader.broker.mock import MockBroker
 from system.apps.trader.trader import Trader
 from system.config.settings import Settings
-from system.libs.db import feed_store, metadata
+from system.libs.db import feed_store, metadata, signals_store
 
 
 class FixedPriceMockBroker(MockBroker):
@@ -45,6 +45,13 @@ def metadata_conn(settings: Settings) -> sqlite3.Connection:
 @pytest.fixture
 def feed_conn(settings: Settings) -> sqlite3.Connection:
     conn = feed_store.connect(settings.feed_db_path)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def signals_conn(settings: Settings) -> sqlite3.Connection:
+    conn = signals_store.connect(settings.signals_db_path)
     yield conn
     conn.close()
 
@@ -110,5 +117,5 @@ def mock_broker(tmp_path: Path) -> FixedPriceMockBroker:
 
 
 @pytest.fixture
-def trader(mock_broker, feed_conn, metadata_conn) -> Trader:
-    return Trader(broker=mock_broker, feed_conn=feed_conn, metadata_conn=metadata_conn)
+def trader(mock_broker, feed_conn, signals_conn, metadata_conn) -> Trader:
+    return Trader(broker=mock_broker, feed_conn=feed_conn, signals_conn=signals_conn, metadata_conn=metadata_conn)

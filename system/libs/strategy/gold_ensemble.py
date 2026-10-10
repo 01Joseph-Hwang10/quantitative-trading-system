@@ -6,12 +6,10 @@ import numpy as np
 import pandas as pd
 import talib
 
+from system.libs.signals.technical import compute_adx_series, compute_t_t_series
 from system.libs.strategy.base import MarketView, Signal
 
 # ── Constants ──────────────────────────────────────────────────────────────
-_MACRO_WINDOWS = [10, 20, 40, 60]
-_EPSILON = 1e-9
-
 _STRATEGY_DESCRIPTION = """
 ## Overview
 
@@ -113,15 +111,24 @@ class GoldEnsembleStrategy:
 
     def decide(self, view: MarketView) -> tuple[Signal, dict[str, Any]]:
         close = view.ohlcv["close"].astype(float)
-        high = view.ohlcv["high"].astype(float)
-        low = view.ohlcv["low"].astype(float)
 
         # Warmup guard: indicators need history; the notebook returns (no
         # decision) until ADX / SMA20 / SMA60 / D_t are all defined.
         if len(close) < 2 or len(close) < max(self.n_bb, self.n_long, self.n_adx):
             return Signal.HOLD, {"reason": "warmup"}
 
-        adx = talib.ADX(high.to_numpy(), low.to_numpy(), close.to_numpy(), timeperiod=self.n_adx)
+        # Shared computations (also persisted to signals.db by the trader):
+        # one implementation for stored history and decision-time values.
+        adx = compute_adx_series(view.ohlcv, n_adx=self.n_adx).to_numpy()
+        timing_series = compute_t_t_series(
+            view.ohlcv,
+            n_adx=self.n_adx,
+            theta_adx=self.theta_adx,
+            n_bb=self.n_bb,
+            k=self.k,
+            n_short=self.n_short,
+            n_long=self.n_long,
+        )
         mu = talib.SMA(close.to_numpy(), timeperiod=self.n_bb)
         std = close.rolling(self.n_bb).std().to_numpy()
         upper = mu + self.k * std
@@ -130,9 +137,9 @@ class GoldEnsembleStrategy:
         ma_long = talib.SMA(close.to_numpy(), timeperiod=self.n_long)
 
         d_t_column = f"D_t_{self.n_macro}"
-        if d_t_column not in view.macro.columns:
-            raise KeyError(f"Macro frame lacks {d_t_column!r} (reindex the view's macro frame)")
-        d_t = view.macro[d_t_column].reindex(_normalize_index(view.ohlcv.index)).ffill().to_numpy()
+        if d_t_column not in view.signals.columns:
+            raise KeyError(f"Signals frame lacks {d_t_column!r} (reindex the view's signals frame)")
+        d_t = view.signals[d_t_column].reindex(_normalize_index(view.ohlcv.index)).ffill().to_numpy()
 
         price = float(close.iloc[-1])
         price_prev = float(close.iloc[-2])
@@ -161,20 +168,8 @@ class GoldEnsembleStrategy:
             indicators["reason"] = "warmup"
             return Signal.HOLD, indicators
 
-        # 1. Technical timing signal T_t (notebook next()).
-        timing = 0
-        if adx_last < self.theta_adx:
-            # Range regime: Bollinger Bands mean reversion.
-            if price < lower_last and price > price_prev:
-                timing = 1
-            elif price > upper_last and price < price_prev:
-                timing = -1
-        else:
-            # Trend regime: double moving average trend following.
-            if ma_short_last > ma_long_last and price > ma_long_last:
-                timing = 1
-            elif ma_short_last < ma_long_last and price < ma_long_last:
-                timing = -1
+        # 1. Technical timing signal T_t (last bar of the shared series).
+        timing = int(timing_series.iloc[-1])
         indicators["t_t"] = timing
 
         # 2. Position management (whole positions only).
@@ -210,41 +205,8 @@ class GoldEnsembleStrategy:
 
 
 # ── Helper functions ───────────────────────────────────────────────────────
-def compute_macro_frame(tnx: pd.Series, dxy: pd.Series, fx: pd.Series) -> pd.DataFrame:
-    """Replicate notebook cell 4: delayed macro series and D_t_{n} columns.
-
-    A 1-day lag (shift(1)) prevents look-ahead bias; D_t_n averages three
-    tanh-normalized reversal/continuation scores:
-      s_tnx = -tanh(r_tnx / sigma_tnx)
-      s_dxy = -tanh(r_dxy / sigma_dxy)
-      s_fx  = +tanh(r_fx / sigma_fx)
-    """
-    unified_index = tnx.index.union(dxy.index).union(fx.index).sort_values()
-    macro = pd.DataFrame(index=unified_index)
-    macro["TNX"] = tnx.reindex(unified_index).ffill()
-    macro["DXY"] = dxy.reindex(unified_index).ffill()
-    macro["FX"] = fx.reindex(unified_index).ffill()
-
-    macro["TNX_delayed"] = macro["TNX"].shift(1)
-    macro["DXY_delayed"] = macro["DXY"].shift(1)
-    macro["FX_delayed"] = macro["FX"].shift(1)
-
-    for window in _MACRO_WINDOWS:
-        return_tnx = macro["TNX_delayed"].pct_change(window)
-        return_dxy = macro["DXY_delayed"].pct_change(window)
-        return_fx = macro["FX_delayed"].pct_change(window)
-        sigma_tnx = return_tnx.rolling(window).std()
-        sigma_dxy = return_dxy.rolling(window).std()
-        sigma_fx = return_fx.rolling(window).std()
-        score_tnx = -np.tanh(return_tnx / (sigma_tnx + _EPSILON))
-        score_dxy = -np.tanh(return_dxy / (sigma_dxy + _EPSILON))
-        score_fx = np.tanh(return_fx / (sigma_fx + _EPSILON))
-        macro[f"D_t_{window}"] = (score_tnx + score_dxy + score_fx) / 3
-    return macro
-
-
 def _normalize_index(index: pd.Index) -> pd.Index:
-    """Macro frames are daily-date-indexed; views may carry tz-aware stamps."""
+    """Signals frames are daily-date-indexed; views may carry tz-aware stamps."""
     if isinstance(index, pd.DatetimeIndex):
         if index.tz is not None:
             return index.tz_localize(None).normalize()

@@ -2,7 +2,7 @@
 
 Two schedules are evaluated with croniter:
 - decision_schedule_cron: run a full Trader cycle (default 15:00 KST weekdays)
-- feed_update_schedule_cron: update data feeds only (default 09:00 KST)
+- feed_update_schedule_cron: update data feeds + derived signals (default 09:00 KST)
 
 The loop wakes on a small interval so SIGTERM (Docker stop) is honored within
 seconds. Cron controls *when we attempt*; the cycle's market-open guard still
@@ -70,7 +70,8 @@ class Runner:
                     self.trader.run_cycle()
                 else:
                     updated = self.trader.update_feeds()
-                    logger.info("Feed update complete: %s", updated)
+                    signals_updated = self.trader.update_signals()
+                    logger.info("Feed update complete: %s (signals: %s)", updated, signals_updated)
             except Exception:  # noqa: BLE001 - the daemon must survive cycle errors
                 logger.exception("Scheduled run failed; continuing")
         logger.info("Trader daemon stopped")

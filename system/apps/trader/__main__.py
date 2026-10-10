@@ -49,6 +49,7 @@ def main() -> int:
         trader = Trader(
             broker=broker,
             feed_conn=connections.feed,
+            signals_conn=connections.signals,
             metadata_conn=connections.metadata,
             timezone_name=settings.timezone,
         )

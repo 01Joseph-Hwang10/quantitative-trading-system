@@ -9,7 +9,7 @@ import pytest
 
 from system.apps.trader.broker.mock import SEED_CASH
 from system.apps.trader.trader import Trader
-from system.libs.db import metadata
+from system.libs.db import metadata, signals_store
 from system.libs.feeds.registry import TRADING_STOCK_FEED, TRADING_STOCK_SYMBOL
 from system.libs.strategy.base import Signal
 from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy
@@ -47,9 +47,9 @@ def test_cycle_hold_skip_when_disabled(trader, metadata_conn):
     assert decisions[0]["executed"] == 0
 
 
-def test_cycle_hold_skip_when_market_closed(mock_broker, feed_conn, metadata_conn):
+def test_cycle_hold_skip_when_market_closed(mock_broker, feed_conn, signals_conn, metadata_conn):
     mock_broker.is_market_open = lambda: False
-    trader = Trader(broker=mock_broker, feed_conn=feed_conn, metadata_conn=metadata_conn)
+    trader = Trader(broker=mock_broker, feed_conn=feed_conn, signals_conn=signals_conn, metadata_conn=metadata_conn)
     signal = trader.run_cycle()
     assert signal is Signal.HOLD
     assert metadata.list_decisions(metadata_conn)[0]["reason"] == "market_closed"
@@ -94,11 +94,11 @@ def test_buy_and_sell_flow_end_to_end(trader, feed_conn, metadata_conn, mock_bro
     assert sells[0]["status"] == "FILLED"
 
 
-def test_insufficient_cash_is_rejected(feed_conn, metadata_conn, tmp_path):
+def test_insufficient_cash_is_rejected(feed_conn, signals_conn, metadata_conn, tmp_path):
     broke_broker = FixedPriceMockBroker(tmp_path / "positions.json", price=10_000.0)
     broke_broker._state["cash"] = 5_000.0  # less than one share
     broke_broker._save_state()
-    trader = Trader(broker=broke_broker, feed_conn=feed_conn, metadata_conn=metadata_conn)
+    trader = Trader(broker=broke_broker, feed_conn=feed_conn, signals_conn=signals_conn, metadata_conn=metadata_conn)
     seed_feed_world(feed_conn)
     trader.strategy = StubStrategy(Signal.BUY)
     trader.run_cycle()
@@ -113,3 +113,13 @@ def test_update_feeds_is_idempotent(trader, feed_conn):
     second = trader.update_feeds()
     assert all(count == 0 for count in first.values())
     assert all(count == 0 for count in second.values())
+
+
+def test_run_cycle_updates_signals(signals_conn, trader, feed_conn):
+    seed_feed_world(feed_conn)
+    trader.run_cycle()
+    stored = {row["name"] for row in signals_store.list_signals(signals_conn)}
+    assert {"s_tnx", "s_dxy", "s_fx", "d_t_10", "adx_14", "t_t"} <= stored
+    # Idempotent: a second cycle stores nothing new.
+    counts = trader.update_signals()
+    assert all(count == 0 for count in counts.values())
