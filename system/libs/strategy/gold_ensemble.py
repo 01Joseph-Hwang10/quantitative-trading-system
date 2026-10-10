@@ -1,14 +1,3 @@
-"""GoldEnsembleStrategy — faithful port of notebooks/strategy_1.ipynb.
-
-Macro gate D_t (TNX/DXY/FX tanh scores) × technical timing T_t (ADX regime
-switch between Bollinger mean-reversion and SMA trend-following), exactly as
-in notebook cells 4 and 6.
-
-Hyperparameters are the static, tuned values from the notebook's optimization
-output (Sharpe 1.2181 / Return 31.59% on the training range):
-n_macro=10, k=1.5, theta_entry=0.3.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -19,41 +8,83 @@ import talib
 
 from system.libs.strategy.base import MarketView, Signal
 
+# ── Constants ──────────────────────────────────────────────────────────────
 _MACRO_WINDOWS = [10, 20, 40, 60]
 _EPSILON = 1e-9
 
+_STRATEGY_DESCRIPTION = """
+## Overview
 
-def compute_macro_frame(tnx: pd.Series, dxy: pd.Series, fx: pd.Series) -> pd.DataFrame:
-    """Replicate notebook cell 4: delayed macro series and D_t_{n} columns.
+**GoldEnsembleStrategy** is a long-only ensemble that gates a technical timing
+model with a macro regime score. It trades the KRX gold instrument (`0072R0`)
+once per decision cycle, always in whole positions.
 
-    A 1-day lag (shift(1)) prevents look-ahead bias; D_t_n averages three
-    tanh-normalized reversal/continuation scores:
-      s_tnx = -tanh(r_tnx / sigma_tnx)
-      s_dxy = -tanh(r_dxy / sigma_dxy)
-      s_fx  = +tanh(r_fx / sigma_fx)
-    """
-    unified_index = tnx.index.union(dxy.index).union(fx.index).sort_values()
-    macro = pd.DataFrame(index=unified_index)
-    macro["TNX"] = tnx.reindex(unified_index).ffill()
-    macro["DXY"] = dxy.reindex(unified_index).ffill()
-    macro["FX"] = fx.reindex(unified_index).ffill()
+The signal is the combination of two independent layers:
 
-    macro["TNX_delayed"] = macro["TNX"].shift(1)
-    macro["DXY_delayed"] = macro["DXY"].shift(1)
-    macro["FX_delayed"] = macro["FX"].shift(1)
+- **Macro gate `D_t`** — is the macro environment favorable for gold?
+- **Technical timing `T_t`** — does the price action support an entry?
 
-    for window in _MACRO_WINDOWS:
-        return_tnx = macro["TNX_delayed"].pct_change(window)
-        return_dxy = macro["DXY_delayed"].pct_change(window)
-        return_fx = macro["FX_delayed"].pct_change(window)
-        sigma_tnx = return_tnx.rolling(window).std()
-        sigma_dxy = return_dxy.rolling(window).std()
-        sigma_fx = return_fx.rolling(window).std()
-        score_tnx = -np.tanh(return_tnx / (sigma_tnx + _EPSILON))
-        score_dxy = -np.tanh(return_dxy / (sigma_dxy + _EPSILON))
-        score_fx = np.tanh(return_fx / (sigma_fx + _EPSILON))
-        macro[f"D_t_{window}"] = (score_tnx + score_dxy + score_fx) / 3
-    return macro
+A BUY requires *both* layers to agree; a SELL is triggered by the OR of five
+exit conditions.
+
+## Macro gate `D_t`
+
+Inputs are daily closes, 1-day lagged (`shift(1)`) to prevent look-ahead bias:
+
+| Series | Ticker | Score | Rationale |
+| --- | --- | --- | --- |
+| US 10Y Treasury yield | `^TNX` | `s_tnx = -tanh(r / sigma)` | rising yields hurt gold |
+| US Dollar Index | `DX-Y.NYB` | `s_dxy = -tanh(r / sigma)` | a stronger dollar hurts gold |
+| USD/KRW | `USDKRW=X` | `s_fx = +tanh(r / sigma)` | a weaker KRW lifts the KRW gold price |
+
+Each score is a short-term reversal signal: the series return over the
+lookback window is normalized by its rolling volatility and squashed with
+`tanh`. `D_t` is the mean of the three scores over `n_macro = 10` days, so
+values above the entry threshold mean the macro tailwinds are all pointing
+toward gold.
+
+## Technical timing `T_t`
+
+`T_t` is an ADX(14) regime switch between two styles:
+
+- **Range regime** (ADX < 25) — Bollinger Bands mean reversion with BB(20,
+  k = 1.5): `T_t = +1` when price closes below the lower band and turns up;
+  `T_t = -1` when price closes above the upper band and turns down.
+- **Trend regime** (ADX >= 25) — double moving-average trend following with
+  SMA(20) / SMA(60): `T_t = +1` when SMA20 > SMA60 and price > SMA60;
+  `T_t = -1` when SMA20 < SMA60 and price < SMA60.
+
+## Position management
+
+- **Entry (BUY)** — while flat: `D_t > 0.3` and `T_t = +1`.
+- **Exit (SELL)** — while long, any of:
+  1. **Macro exit**: `D_t < -0.2`
+  2. **Timing exit**: `T_t = -1`
+  3. **Trend break**: ADX >= 25 and (price < SMA60 or SMA20 < SMA60)
+  4. **Range reversion target**: ADX < 25 and price >= SMA20
+  5. **Stop loss**: drawdown from entry price > 5%
+- Otherwise HOLD (including the indicator warm-up period).
+
+## Parameters
+
+| Parameter | Value | Role | Source |
+| --- | --- | --- | --- |
+| `n_macro` | 10 | Macro score lookback (days) | tuned |
+| `k` | 1.5 | Bollinger Band width (std devs) | tuned |
+| `theta_entry` | 0.3 | Macro gate entry threshold | tuned |
+| `n_adx` | 14 | ADX regime window | notebook default |
+| `theta_adx` | 25 | ADX regime split | notebook default |
+| `n_bb` | 20 | Bollinger Bands window | notebook default |
+| `n_short` / `n_long` | 20 / 60 | Trend-following SMAs | notebook default |
+| `theta_exit` | -0.2 | Macro exit threshold | notebook default |
+| `theta_stop` | 0.05 | Stop-loss drawdown (5%) | notebook default |
+
+## Provenance
+
+Faithful port of `notebooks/strategy_1.ipynb` (cells 4 and 6). The tuned
+hyperparameters are the static values from the notebook's optimization output
+(Sharpe 1.2181 / Return 31.59% on the training range).
+"""
 
 
 class GoldEnsembleStrategy:
@@ -74,6 +105,11 @@ class GoldEnsembleStrategy:
     n_long = 60
     theta_exit = -0.2
     theta_stop = 0.05
+
+    @property
+    def description(self) -> str:
+        """Markdown white paper of the strategy."""
+        return _STRATEGY_DESCRIPTION
 
     def decide(self, view: MarketView) -> tuple[Signal, dict[str, Any]]:
         close = view.ohlcv["close"].astype(float)
@@ -171,6 +207,40 @@ class GoldEnsembleStrategy:
             indicators["exit_reasons"] = exit_reasons
             return Signal.SELL, indicators
         return Signal.HOLD, indicators
+
+
+# ── Helper functions ───────────────────────────────────────────────────────
+def compute_macro_frame(tnx: pd.Series, dxy: pd.Series, fx: pd.Series) -> pd.DataFrame:
+    """Replicate notebook cell 4: delayed macro series and D_t_{n} columns.
+
+    A 1-day lag (shift(1)) prevents look-ahead bias; D_t_n averages three
+    tanh-normalized reversal/continuation scores:
+      s_tnx = -tanh(r_tnx / sigma_tnx)
+      s_dxy = -tanh(r_dxy / sigma_dxy)
+      s_fx  = +tanh(r_fx / sigma_fx)
+    """
+    unified_index = tnx.index.union(dxy.index).union(fx.index).sort_values()
+    macro = pd.DataFrame(index=unified_index)
+    macro["TNX"] = tnx.reindex(unified_index).ffill()
+    macro["DXY"] = dxy.reindex(unified_index).ffill()
+    macro["FX"] = fx.reindex(unified_index).ffill()
+
+    macro["TNX_delayed"] = macro["TNX"].shift(1)
+    macro["DXY_delayed"] = macro["DXY"].shift(1)
+    macro["FX_delayed"] = macro["FX"].shift(1)
+
+    for window in _MACRO_WINDOWS:
+        return_tnx = macro["TNX_delayed"].pct_change(window)
+        return_dxy = macro["DXY_delayed"].pct_change(window)
+        return_fx = macro["FX_delayed"].pct_change(window)
+        sigma_tnx = return_tnx.rolling(window).std()
+        sigma_dxy = return_dxy.rolling(window).std()
+        sigma_fx = return_fx.rolling(window).std()
+        score_tnx = -np.tanh(return_tnx / (sigma_tnx + _EPSILON))
+        score_dxy = -np.tanh(return_dxy / (sigma_dxy + _EPSILON))
+        score_fx = np.tanh(return_fx / (sigma_fx + _EPSILON))
+        macro[f"D_t_{window}"] = (score_tnx + score_dxy + score_fx) / 3
+    return macro
 
 
 def _normalize_index(index: pd.Index) -> pd.Index:

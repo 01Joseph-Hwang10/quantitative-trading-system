@@ -38,6 +38,11 @@ class MarketView:
 class Strategy(Protocol):
     """Decision interface implemented by concrete strategies."""
 
+    @property
+    def description(self) -> str:
+        """Markdown white paper of the strategy (rendered by the monitor)."""
+        ...
+
     def decide(self, view: MarketView) -> tuple[Signal, dict[str, Any]]:
         """Return the signal plus indicator values for logging."""
         ...

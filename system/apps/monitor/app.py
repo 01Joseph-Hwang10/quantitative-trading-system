@@ -24,6 +24,7 @@ from system.config.gateways import Connections
 from system.config.settings import Settings
 from system.libs.db import feed_store, metadata
 from system.libs.feeds.registry import feed_names
+from system.libs.strategy.gold_ensemble import GoldEnsembleStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ def main() -> None:
         ),
         st.Page(partial(render_data_feeds, connections.feed), title="Data Feeds", icon="🗂️", url_path="data-feeds"),
         st.Page(partial(render_trades, connections.metadata), title="Trades", icon="🧾", url_path="trades"),
+        st.Page(render_strategy, title="Strategy", icon=":material/description:", url_path="strategy"),
         st.Page(
             partial(render_settings, settings, connections.metadata),
             title="Settings",
@@ -448,6 +450,15 @@ def _ohlcv_figure(frame: pd.DataFrame, name: str) -> go.Figure:
 
 
 # ── Trades ──────────────────────────────────────────────────────────────────
+# ── Strategy ───────────────────────────────────────────────────────────────
+def render_strategy() -> None:
+    """Markdown white paper of the active strategy (static, no db access)."""
+    strategy = GoldEnsembleStrategy()
+    st.header(f"Strategy: {strategy.name}")
+    st.markdown(strategy.description)
+
+
+# ── Trades ─────────────────────────────────────────────────────────────────
 def render_trades(metadata_conn: sqlite3.Connection) -> None:
     st.header("Trades")
     trades = metadata.list_trades(metadata_conn)
